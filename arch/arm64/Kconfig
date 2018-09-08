@@ -1537,3 +1537,30 @@ endif
 source "lib/Kconfig"
 
 source "techpack/Kconfig"
+
+menu "Xiaomi configuration options"
+
+config MACH_XIAOMI
+        bool "Xiaomi device"
+        depends on ARCH_QCOM
+        help
+          Support for Xiaomi products
+
+config MACH_XIAOMI_SM6150
+        bool "Xiaomi SM6150"
+        depends on ARCH_SM6150
+        select MACH_XIAOMI
+        help
+          Support for Sm6150-based Xiaomi variants
+
+menu "Xiaomi board selection"
+
+config MACH_XIAOMI_F7B
+        bool "violet board"
+        select MACH_XIAOMI_SM6150
+        help
+          Support for Redmi Note 7 Pro
+
+endmenu
+
+endmenu
