@@ -202,6 +202,12 @@ config THERMAL_EMULATION
 	  because userland can easily disable the thermal policy by simply
 	  flooding this sysfs node with low temperature values.
 
+config THERMAL_SWITCH
+	default n
+	bool "Support themral config switch"
+	help
+	  Support themral config switch.
+
 config HISI_THERMAL
 	tristate "Hisilicon thermal driver"
 	depends on ARCH_HISI || COMPILE_TEST
