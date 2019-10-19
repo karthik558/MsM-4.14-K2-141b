@@ -714,4 +714,6 @@ int dsi_display_get_panel_vfp(void *display,
 
 struct dsi_display *get_main_display(void);
 
+char *dsi_display_get_cmdline_panel_info(void);
+
 #endif /* _DSI_DISPLAY_H_ */
