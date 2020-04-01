@@ -1,7 +1,7 @@
 ifeq ($(CONFIG_MACH_XIAOMI),y)
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 dtbo-$(CONFIG_MACH_XIAOMI_VIOLET) += violet-sm6150-overlay.dtbo
-violet-sm6150-overlay.dtbo-base := sm6150.dtb
+violet-sm6150-overlay.dtbo-base := violet-sm6150.dtb
 endif
 else
 # SPDX-License-Identifier: GPL-2.0
