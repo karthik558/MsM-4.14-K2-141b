@@ -12,6 +12,7 @@ menuconfig INPUT_TOUCHSCREEN
 if INPUT_TOUCHSCREEN
 source "drivers/input/touchscreen/ft8719_touch_f7b/Kconfig"
 source "drivers/input/touchscreen/nvt_touch_f7b/Kconfig"
+source "drivers/input/touchscreen/xiaomi/Kconfig"
 
 config TOUCHSCREEN_NVT_F7B
 	tristate "novatek touchscreens"
