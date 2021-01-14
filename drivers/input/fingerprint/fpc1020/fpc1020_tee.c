@@ -18,8 +18,7 @@
  *
  *
  * Copyright (c) 2015 Fingerprint Cards AB <tech@fingerprints.com>
- * Copyright (C) 2019 XiaoMi, Inc.
- *
+ * Copyright (C) 2020 XiaoMi, Inc.
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License Version 2
  * as published by the Free Software Foundation.
@@ -58,7 +57,6 @@
 #define NUM_PARAMS_REG_ENABLE_SET 2
 #define PROC_NAME  "hwinfo"
 
-#define tyt_debug printk("tyt %s:%d\n",__func__,__LINE__) 
 static struct proc_dir_entry *proc_entry;
 extern int fpsensor;
 
@@ -183,26 +181,24 @@ static ssize_t clk_enable_set(struct device *dev,
 
 	return count;
 }
-static DEVICE_ATTR(clk_enable, S_IWUSR, NULL, clk_enable_set);
+static DEVICE_ATTR(clk_enable, 0200, NULL, clk_enable_set);
 static ssize_t fingerdown_wait_set(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
- {
+{
 	struct fpc1020_data *fpc1020 = dev_get_drvdata(dev);
 
 	dev_dbg(fpc1020->dev, "%s\n", __func__);
 	if (!strncmp(buf, "enable", strlen("enable"))) {
-		//printk("wait_finger_down enable\n");
 		fpc1020->wait_finger_down = true;
 	} else if (!strncmp(buf, "disable", strlen("disable"))) {
-		//printk("wait_finger_down disable\n");
 		fpc1020->wait_finger_down = false;
 	} else
 		return -EINVAL;
 
 	return count;
 }
-static DEVICE_ATTR(fingerdown_wait, S_IWUSR, NULL, fingerdown_wait_set);
+static DEVICE_ATTR(fingerdown_wait, 0200, NULL, fingerdown_wait_set);
 
 
 /**
@@ -256,7 +252,7 @@ static ssize_t pinctl_set(struct device *dev,
 
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(pinctl_set, S_IWUSR, NULL, pinctl_set);
+static DEVICE_ATTR(pinctl_set, 0200, NULL, pinctl_set);
 
 static ssize_t regulator_enable_set(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
@@ -282,7 +278,7 @@ static ssize_t regulator_enable_set(struct device *dev,
 
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(regulator_enable, S_IWUSR, NULL, regulator_enable_set);
+static DEVICE_ATTR(regulator_enable, 0200, NULL, regulator_enable_set);
 
 static ssize_t irq_enable_set(struct device *dev,
 	struct device_attribute *attr,
@@ -305,7 +301,7 @@ static ssize_t irq_enable_set(struct device *dev,
 
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(irq_enable, S_IWUSR | S_IRUSR | S_IRGRP | S_IWGRP , NULL, irq_enable_set);
+static DEVICE_ATTR(irq_enable, 0660, NULL, irq_enable_set);
 
 static int hw_reset(struct fpc1020_data *fpc1020)
 {
@@ -328,7 +324,7 @@ static int hw_reset(struct fpc1020_data *fpc1020)
 	usleep_range(RESET_HIGH_SLEEP2_MIN_US, RESET_HIGH_SLEEP2_MAX_US);
 
 	irq_gpio = gpio_get_value(fpc1020->irq_gpio);
-	dev_info(dev, "IRQ after reset %d=%d\n",fpc1020->irq_gpio, irq_gpio);
+	dev_info(dev, "IRQ after reset %d=%d\n", fpc1020->irq_gpio, irq_gpio);
 
 exit:
 	return rc;
@@ -350,7 +346,7 @@ static ssize_t hw_reset_set(struct device *dev,
 
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(hw_reset, S_IWUSR, NULL, hw_reset_set);
+static DEVICE_ATTR(hw_reset, 0200, NULL, hw_reset_set);
 
 /**
  * Will setup GPIOs, and regulators to correctly initialize the touch sensor to
@@ -434,7 +430,7 @@ static ssize_t device_prepare_set(struct device *dev,
 
 	return rc ? rc : count;
 }
-static DEVICE_ATTR(device_prepare, S_IWUSR, NULL, device_prepare_set);
+static DEVICE_ATTR(device_prepare, 0200, NULL, device_prepare_set);
 
 /**
  * sysfs node for controlling whether the driver is allowed
@@ -457,7 +453,7 @@ static ssize_t wakeup_enable_set(struct device *dev,
 
 	return ret;
 }
-static DEVICE_ATTR(wakeup_enable, S_IWUSR, NULL, wakeup_enable_set);
+static DEVICE_ATTR(wakeup_enable, 0200, NULL, wakeup_enable_set);
 
 /**
  * sysf node to check the interrupt status of the sensor, the interrupt
@@ -474,7 +470,7 @@ static ssize_t irq_get(struct device *dev,
 }
 
 /**
- * writing to the irq node will just drop a printk message
+ * writing to the irq node will just drop a log message
  * and return success, used for latency measurement.
  */
 static ssize_t irq_ack(struct device *dev,
@@ -488,7 +484,7 @@ static ssize_t irq_ack(struct device *dev,
 
 	return count;
 }
-static DEVICE_ATTR(irq, S_IRUSR | S_IWUSR, irq_get, irq_ack);
+static DEVICE_ATTR(irq, 0600, irq_get, irq_ack);
 
 static struct attribute *attributes[] = {
 	&dev_attr_pinctl_set.attr,
@@ -497,7 +493,7 @@ static struct attribute *attributes[] = {
 	&dev_attr_hw_reset.attr,
 	&dev_attr_wakeup_enable.attr,
 	&dev_attr_clk_enable.attr,
- 	&dev_attr_irq_enable.attr,
+	&dev_attr_irq_enable.attr,
 	&dev_attr_irq.attr,
 	&dev_attr_fingerdown_wait.attr,
 	NULL
@@ -514,17 +510,15 @@ static irqreturn_t fpc1020_irq_handler(int irq, void *handle)
 	dev_dbg(fpc1020->dev, "%s\n", __func__);
 
 	if (atomic_read(&fpc1020->wakeup_enabled)) {
-		//wake_lock_timeout(&fpc1020->ttw_wl,
-		//			msecs_to_jiffies(FPC_TTW_HOLD_TIME));
-		__pm_wakeup_event(&fpc1020->ttw_ws, FPC_TTW_HOLD_TIME);//for kernel 4.9
+		__pm_wakeup_event(&fpc1020->ttw_ws, FPC_TTW_HOLD_TIME);
 	}
 
 	sysfs_notify(&fpc1020->dev->kobj, NULL, dev_attr_irq.attr.name);
 	if (fpc1020->wait_finger_down && fpc1020->fb_black) {
-		//printk("%s enter\n", __func__);
+		pr_info("fpc schedule_work enter\n");
 		fpc1020->wait_finger_down = false;
 		schedule_work(&fpc1020->work);
-	}  
+	}
 	return IRQ_HANDLED;
 }
 
@@ -557,28 +551,26 @@ static int fpc_fb_notif_callback(struct notifier_block *nb,
 	struct fpc1020_data *fpc1020 = container_of(nb, struct fpc1020_data,
 			fb_notifier);
 	struct fb_event *evdata = data;
-	unsigned int blank;
+	int *blank;
 
 	if (!fpc1020)
 		return 0;
 
-	if (val != MSM_DRM_EVENT_BLANK )
+	if (val != MSM_DRM_EVENT_BLANK && val != MSM_DRM_EARLY_EVENT_BLANK)
 		return 0;
 
-	printk("hml [info] %s value = %d\n", __func__, (int)val);
+	pr_debug("hml [info] %s value = %d\n", __func__, (int)val);
 
-	if (evdata && evdata->data && val == MSM_DRM_EVENT_BLANK) {
-		blank = *(int *)(evdata->data);
-		switch (blank) {
-		case MSM_DRM_BLANK_POWERDOWN:
-			fpc1020->fb_black = true;
-			break;
-		case MSM_DRM_BLANK_UNBLANK:
+
+    if (evdata && evdata->data && val == MSM_DRM_EVENT_BLANK) {
+		blank = evdata->data;
+		if (*blank == MSM_DRM_BLANK_UNBLANK) {
 			fpc1020->fb_black = false;
-			break;
-		default:
-			printk("%s defalut\n", __func__);
-			break;
+		}
+	} else if (evdata && evdata->data && val == MSM_DRM_EARLY_EVENT_BLANK) {
+		blank = evdata->data;
+		if (*blank == MSM_DRM_BLANK_POWERDOWN) {
+			fpc1020->fb_black = true;
 		}
 	}
 	return NOTIFY_OK;
@@ -589,16 +581,16 @@ static struct notifier_block fpc_notif_block = {
 	.notifier_call = fpc_fb_notif_callback,
 };
 
-static int proc_show_ver(struct seq_file *file,void *v)
+static int proc_show_ver(struct seq_file *file, void *v)
 {
-	seq_printf(file,"Fingerprint: FPC\n");
+	seq_printf(file, "Fingerprint: FPC\n");
 	return 0;
 }
 
-static int proc_open(struct inode *inode,struct file *file)
+static int proc_open(struct inode *inode, struct file *file)
 {
-	printk("fpc proc_open\n");
-	single_open(file,proc_show_ver,NULL);
+	pr_info("fpc proc_opening\n");
+	single_open(file, proc_show_ver, NULL);
 	return 0;
 }
 
@@ -626,9 +618,9 @@ static int fpc1020_probe(struct platform_device *pdev)
 	}
 
 	if(fpsensor != 1){
-                 pr_err("Macle fpc1020_probe failed as fpsensor=%d(1=fp)\n", fpsensor);
-                 return -1;
-         }
+		pr_err("Macle fpc1020_probeing failed as fpsensor=%d(1=fp)\n", fpsensor);
+		return -ENOMEM;
+	}
 
 
 	fpc1020->dev = dev;
@@ -723,10 +715,10 @@ static int fpc1020_probe(struct platform_device *pdev)
 
 	proc_entry = proc_create(PROC_NAME, 0644, NULL, &proc_file_fpc_ops);
 	if (NULL == proc_entry) {
-		printk("fpc1020 Couldn't create proc entry!");
+		pr_err("fpc1020 Couldn't create proc entry!");
 		return -ENOMEM;
 	} else {
-		printk("fpc1020 Create proc entry success!");
+		pr_err("fpc1020 Create proc entry success!");
 	}
 
 
@@ -751,7 +743,7 @@ static int fpc1020_remove(struct platform_device *pdev)
 	(void)vreg_setup(fpc1020, "vdd_ana", false);
 	(void)vreg_setup(fpc1020, "vdd_io", false);
 	(void)vreg_setup(fpc1020, "vcc_spi", false);
-	remove_proc_entry(PROC_NAME,NULL);
+	remove_proc_entry(PROC_NAME, NULL);
 	dev_info(&pdev->dev, "%s\n", __func__);
 
 	return 0;
