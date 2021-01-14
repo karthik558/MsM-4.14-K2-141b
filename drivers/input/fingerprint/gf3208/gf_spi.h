@@ -93,6 +93,8 @@ struct gf_ioc_chip_info {
 #define GF_IOC_GET_FW_INFO      _IOR(GF_IOC_MAGIC, 11, uint8_t)
 #define GF_IOC_REMOVE           _IO(GF_IOC_MAGIC, 12)
 #define GF_IOC_CHIP_INFO        _IOW(GF_IOC_MAGIC, 13, struct gf_ioc_chip_info)
+#define GF_IOC_AUTHENTICATE_START	_IO(GF_IOC_MAGIC, 15)
+#define GF_IOC_AUTHENTICATE_END	_IO(GF_IOC_MAGIC, 16)
 
 #if defined(SUPPORT_NAV_EVENT)
 #define GF_IOC_NAV_EVENT	_IOW(GF_IOC_MAGIC, 14, gf_nav_event_t)
@@ -124,10 +126,10 @@ struct gf_dev {
 
 	struct input_dev *input;
 	/* buffer is NULL unless this device is open (users > 0) */
-	unsigned users;
-	signed irq_gpio;
-	signed reset_gpio;
-	signed pwr_gpio;
+	unsigned int users;
+	signed int irq_gpio;
+	signed int reset_gpio;
+	signed int pwr_gpio;
 	int irq;
 	int irq_enabled;
 	int clk_enabled;
@@ -141,7 +143,7 @@ struct gf_dev {
 	struct work_struct work;
 };
 
-int gf_parse_dts(struct gf_dev* gf_dev);
+int gf_parse_dts(struct gf_dev *gf_dev);
 void gf_cleanup(struct gf_dev *gf_dev);
 
 int gf_power_on(struct gf_dev *gf_dev);
