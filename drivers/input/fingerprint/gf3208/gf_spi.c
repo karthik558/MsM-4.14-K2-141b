@@ -1,8 +1,7 @@
 /*
  * TEE driver for goodix fingerprint sensor
  * Copyright (C) 2016 Goodix
- * Copyright (C) 2019 XiaoMi, Inc.
- *
+ * Copyright (C) 2020 XiaoMi, Inc.
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -41,6 +40,7 @@
 #include <linux/pm_qos.h>
 #include <linux/cpufreq.h>
 #include <linux/mdss_io_util.h>
+//#include <linux/wakelock.h>
 #include <linux/proc_fs.h>
 #include "gf_spi.h"
 #include <linux/unistd.h>
@@ -58,12 +58,12 @@
 #define VER_MAJOR   1
 #define VER_MINOR   2
 #define PATCH_LEVEL 10
-
+#define FAIL -1
 
 #define WAKELOCK_HOLD_TIME 2000 /* in ms */
 #define FP_UNLOCK_REJECTION_TIMEOUT (WAKELOCK_HOLD_TIME - 500)
 #define GF_SPIDEV_NAME     "goodix,fingerprint"
-/*device name after register in charater*/
+/*device name after register in character*/
 #define GF_DEV_NAME            "goodix_fp"
 #define	GF_INPUT_NAME	    "uinput-goodix"/*"goodix_fp" */
 
@@ -347,13 +347,14 @@ static void nav_event_input(struct gf_dev *gf_dev, gf_nav_event_t nav_event)
 static irqreturn_t gf_irq(int irq, void *handle)
 {
 #if defined(GF_NETLINK_ENABLE)
-	char msg = GF_NET_EVENT_IRQ;
+	char msg[2] =  { 0x0 };
 	struct gf_dev *gf_dev = &gf;
 	//wake_lock_timeout(&fp_wakelock, msecs_to_jiffies(WAKELOCK_HOLD_TIME));
 	__pm_wakeup_event(&fp_ws, WAKELOCK_HOLD_TIME);//for kernel 4.9
-	sendnlmsg(&msg);
+	msg[0] = GF_NET_EVENT_IRQ;
+	sendnlmsg(msg);
 	if (gf_dev->device_available == 1) {
-		printk("%s:shedule_work\n",__func__);
+		pr_info("%s:shedule_work\n", __func__);
 		gf_dev->wait_finger_down = false;
 		schedule_work(&gf_dev->work);
 	}
@@ -551,6 +552,16 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		pr_info("operation: 0x%x\n", info.operation);
 		break;
 
+	case GF_IOC_AUTHENTICATE_START:
+		pr_debug("%s GF_IOC_AUTHENTICATE_START\n", __func__);
+		gf_dev->device_available = 1;
+		break;
+
+	case GF_IOC_AUTHENTICATE_END:
+		pr_debug("%s GF_IOC_AUTHENTICATE_END\n", __func__);
+		gf_dev->device_available = 0;
+		break;
+
 	default:
 		pr_warn("unsupport cmd:0x%x\n", cmd);
 		break;
@@ -598,7 +609,7 @@ static int gf_open(struct inode *inode, struct file *filp)
 					goto err_irq;
 			}
 			//gf_hw_reset(gf_dev, 3);//reserve for timing sequence
-			gf_dev->device_available = 1;
+			gf_disable_irq(gf_dev);
 		}
 	} else {
 		pr_info("No device for minor %d\n", iminor(inode));
@@ -613,16 +624,16 @@ err_parse_dt:
 	return status;
 }
 
-static int proc_show_ver(struct seq_file *file,void *v)
+static int proc_show_ver(struct seq_file *file, void *v)
 {
-	seq_printf(file,"Fingerprint: Goodix\n");
+	seq_printf(file, "Fingerprint: Goodix\n");
 	return 0;
 }
 
-static int proc_open(struct inode *inode,struct file *file)
+static int proc_open(struct inode *inode, struct file *file)
 {
-	printk("gf3258 proc_open\n");
-	single_open(file,proc_show_ver,NULL);
+	pr_info("gf3258 proc_opening\n");
+	single_open(file, proc_show_ver, NULL);
 	return 0;
 }
 
@@ -651,7 +662,7 @@ static int gf_release(struct inode *inode, struct file *filp)
 	gf_dev->users--;
 	if (!gf_dev->users) {
 
-		pr_info("disble_irq. irq = %d\n", gf_dev->irq);
+		pr_info("disable_irq. irq = %d\n", gf_dev->irq);
 		//gf_disable_irq(gf_dev);
 		irq_cleanup(gf_dev);
 		gf_cleanup(gf_dev);
@@ -692,46 +703,41 @@ static int goodix_fb_state_chg_callback(struct notifier_block *nb,
 {
 	struct gf_dev *gf_dev;
 	struct fb_event *evdata = data;
-	unsigned int blank;
-	char msg = 0;
+	int *blank;
+	char msg[2] = { 0x0 };
 
-	if (val != MSM_DRM_EVENT_BLANK)
+	if (val != MSM_DRM_EVENT_BLANK && val != MSM_DRM_EARLY_EVENT_BLANK)
 		return 0;
-	pr_info("[info] %s go to the goodix_fb_state_chg_callback value = %d\n",
+	pr_info("[info] %s go to the goodix_fb_state_chg_callbacking value = %d\n",
 			__func__, (int)val);
 	gf_dev = container_of(nb, struct gf_dev, notifier);
 	if (evdata && evdata->data && val == MSM_DRM_EVENT_BLANK && gf_dev) {
-		blank = *(int *)(evdata->data);
-		switch (blank) {
-		case MSM_DRM_BLANK_POWERDOWN:
-			if (gf_dev->device_available == 1) {
+		blank = evdata->data;
+		if (gf_dev->device_available == 1 && *blank == MSM_DRM_BLANK_UNBLANK) {
+				gf_dev->fb_black = 0;
+#if defined(GF_NETLINK_ENABLE)
+				msg[0] = GF_NET_EVENT_FB_UNBLACK;
+				sendnlmsg(msg);
+#elif defined(GF_FASYNC)
+				if (gf_dev->async)
+					kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
+#endif
+			}
+
+	}else if(evdata && evdata->data && val == MSM_DRM_EARLY_EVENT_BLANK && gf_dev){
+		blank = evdata->data;
+			if (gf_dev->device_available == 1 && *blank == MSM_DRM_BLANK_POWERDOWN) {
 				gf_dev->fb_black = 1;
 				gf_dev->wait_finger_down = true;
 #if defined(GF_NETLINK_ENABLE)
-				msg = GF_NET_EVENT_FB_BLACK;
-				sendnlmsg(&msg);
+				msg[0] = GF_NET_EVENT_FB_BLACK;
+				sendnlmsg(msg);
 #elif defined(GF_FASYNC)
 				if (gf_dev->async)
 					kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
 #endif
 			}
-			break;
-		case MSM_DRM_BLANK_UNBLANK:
-			if (gf_dev->device_available == 1) {
-				gf_dev->fb_black = 0;
-#if defined(GF_NETLINK_ENABLE)
-				msg = GF_NET_EVENT_FB_UNBLACK;
-				sendnlmsg(&msg);
-#elif defined(GF_FASYNC)
-				if (gf_dev->async)
-					kill_fasync(&gf_dev->async, SIGIO, POLL_IN);
-#endif
-			}
-			break;
-		default:
-			pr_info("%s defalut\n", __func__);
-			break;
-		}
+
 	}
 	return NOTIFY_OK;
 }
@@ -751,7 +757,7 @@ static int gf_probe(struct platform_device *pdev)
 	int status = -EINVAL;
 	unsigned long minor;
 	int i;
-	printk("Macle11 gf_probe\n");
+	pr_info("Macle11 gf probe\n");
 	/* Initialize the driver data */
 	INIT_LIST_HEAD(&gf_dev->device_entry);
 #if defined(USE_SPI_BUS)
@@ -785,7 +791,6 @@ static int gf_probe(struct platform_device *pdev)
 		goto error_hw;
 	}
 
-      
 	if (status == 0) {
 		set_bit(minor, minors);
 		list_add(&gf_dev->device_entry, &device_list);
@@ -795,7 +800,6 @@ static int gf_probe(struct platform_device *pdev)
 	}
 	mutex_unlock(&device_list_lock);
 
-  
 	gf_dev->input = input_allocate_device();
 	if (gf_dev->input == NULL) {
 		pr_err("%s, failed to allocate input device\n", __func__);
@@ -833,10 +837,10 @@ static int gf_probe(struct platform_device *pdev)
 
 	proc_entry = proc_create(PROC_NAME, 0644, NULL, &proc_file_ops);
 	if (NULL == proc_entry) {
-		printk("gf3258 Couldn't create proc entry!");
+		pr_err("gf3258 Couldn't create proc entry!");
 		return -ENOMEM;
 	} else {
-		printk("gf3258 Create proc entry success!");
+		pr_err("gf3258 Create proc entry success!");
 	}
 
 	pr_info("version V%d.%d.%02d\n", VER_MAJOR, VER_MINOR, PATCH_LEVEL);
@@ -887,7 +891,7 @@ static int gf_remove(struct platform_device *pdev)
 	list_del(&gf_dev->device_entry);
 	device_destroy(gf_class, gf_dev->devt);
 	clear_bit(MINOR(gf_dev->devt), minors);
-	remove_proc_entry(PROC_NAME,NULL);
+	remove_proc_entry(PROC_NAME, NULL);
 	mutex_unlock(&device_list_lock);
 
 	return 0;
@@ -921,9 +925,9 @@ static int __init gf_init(void)
 	 * the driver which manages those device numbers.
 	 */
 	if(fpsensor != 2) {
-    	pr_err(" hml gf_init failed as fpsensor = %d(2=gdx)\n", fpsensor);
-        return -1;
-    }
+		pr_err(" hml gf_initing failed as fpsensor = %d(2=gdx)\n", fpsensor);
+		return FAIL;
+	}
 
 	BUILD_BUG_ON(N_SPI_MINORS > 256);
 	status = register_chrdev(SPIDEV_MAJOR, CHRD_DRIVER_NAME, &gf_fops);
