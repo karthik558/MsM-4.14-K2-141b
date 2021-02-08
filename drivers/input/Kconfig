@@ -117,6 +117,7 @@ config INPUT_MOUSEDEV_PSAUX
 	  If unsure, say Y.
 
 config INPUT_MOUSEDEV_SCREEN_X
+
 	int "Horizontal screen resolution"
 	depends on INPUT_MOUSEDEV
 	default "1024"
@@ -218,6 +219,8 @@ source "drivers/input/rmi4/Kconfig"
 endif
 
 menu "Hardware I/O ports"
+
+source "drivers/input/fingerprint/Kconfig"
 
 source "drivers/input/serio/Kconfig"
 
