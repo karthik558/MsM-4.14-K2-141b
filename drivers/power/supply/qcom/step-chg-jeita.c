@@ -418,6 +418,14 @@ static int get_val(struct range_data *range, int hysteresis, int current_index,
 	*new_index = -EINVAL;
 
 	/*
+	 * As battery temperature may be below 0, range.xxx is a unsigned int, but battery
+	 * temperature is a signed int, so cannot compare them when battery temp is below 0,
+	 * we treat it as 0 degree when the parameter threshold(battery temp) is below 0.
+	 */
+	if (threshold <= 0)
+		threshold = 0;
+
+	/*
 	 * If the threshold is lesser than the minimum allowed range,
 	 * return -ENODATA.
 	 */
