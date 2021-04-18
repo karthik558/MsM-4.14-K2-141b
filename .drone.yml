@@ -1,0 +1,16 @@
+---
+clone: 
+  depth: 1
+kind: pipeline
+type: docker
+name: linux-amd64
+
+platform:
+  arch: amd64
+  os: linux
+
+steps:
+- name: Compiling Litten
+  image: brock5555/kernel
+  commands:
+  - bash build.sh
