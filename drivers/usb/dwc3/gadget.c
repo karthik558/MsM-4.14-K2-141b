@@ -434,7 +434,6 @@ int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 		if (link_state == DWC3_LINK_STATE_U1 ||
 		    link_state == DWC3_LINK_STATE_U2 ||
 		    link_state == DWC3_LINK_STATE_U3) {
-			ret = __dwc3_gadget_wakeup(dwc);
 			dev_WARN_ONCE(dwc->dev, ret, "wakeup failed --> %d\n",
 					ret);
 		}
@@ -1985,11 +1984,6 @@ static int dwc3_gadget_wakeup_int(struct dwc3 *dwc)
 	case DWC3_LINK_STATE_U1:
 	case DWC3_LINK_STATE_RESUME:
 		break;
-	case DWC3_LINK_STATE_U1:
-		if (dwc->gadget.speed < USB_SPEED_SUPER) {
-			link_recover_only = true;
-			break;
-		}
 		/* Intentional fallthrough */
 	default:
 		dev_dbg(dwc->dev, "can't wakeup from link state %d\n",
