@@ -1246,4 +1246,54 @@ config TOUCHSCREEN_ROHM_BU21023
 	  To compile this driver as a module, choose M here: the
 	  module will be called bu21023_ts.
 
+config TOUCHSCREEN_ST
+	bool "STMicroelectronics Touchscreen Driver"
+	depends on I2C
+	help
+	  Say Y here if you have a STMicroelectronics Touchscreen.
+
+	  If unsure, say N.
+
+source "drivers/input/touchscreen/st/Kconfig"
+
+config TOUCHSCREEN_HIMAX_CHIPSET
+	bool "Himax touchpanel CHIPSET"
+	depends on I2C
+	help
+	  Say Y here if you have a Himax CHIPSET touchscreen.
+	  HIMAX controllers are multi touch controllers which can
+	  report 10 touches at a time.
+
+	  If unsure, say N.
+
+source "drivers/input/touchscreen/hxchipset/Kconfig"
+
+config TOUCHSCREEN_SYNAPTICS_DSX
+        bool "Synaptics DSX Touchscreen Driver"
+        depends on I2C
+        help
+          Say Y here if you have a Synaptics Touchscreen.
+
+          If unsure, say N.
+
+source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
+
+config TOUCHSCREEN_SYNAPTICS_TCM
+	bool "Synaptics TCM Touchscreen Driver"
+	depends on I2C
+	help
+	  Say Y here if you have a Synaptics Touchscreen.
+
+	  If unsure, say N.
+
+source "drivers/input/touchscreen/synaptics_tcm/Kconfig"
+
+config TOUCHSCREEN_RAYDIUM_CHIPSET
+	bool "Raydium WT030 touchpanel CHIPSET"
+	depends on I2C
+	help
+	  Say Y here if you have a Raydium WT030 CHIPSET touchscreen.
+
+	  If unsure, say N.
+
 endif

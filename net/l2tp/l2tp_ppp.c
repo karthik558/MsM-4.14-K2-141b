@@ -242,6 +242,12 @@ static void pppol2tp_recv(struct l2tp_session *session, struct sk_buff *skb, int
 	    skb->data[1] == PPP_UI)
 		skb_pull(skb, 2);
 
+	if (skb->len >= 1 && skb->data[0] & 1)
+		*(u8 *)skb_push(skb, 1) = 0;
+
+	if (skb->len < 2)
+		return;
+
 	if (sk->sk_state & PPPOX_BOUND) {
 		struct pppox_sock *po;
 

@@ -17,6 +17,7 @@
 #include <linux/mmc/slot-gpio.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/extcon.h>
 
 #include "slot-gpio.h"
 
@@ -34,6 +35,10 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 {
 	/* Schedule a card detection after a debounce timeout */
 	struct mmc_host *host = dev_id;
+	int present = host->ops->get_cd(host);
+
+	pr_debug("%s: cd gpio irq, gpio state %d (CARD_%s)\n",
+		mmc_hostname(host), present, present?"INSERT":"REMOVAL");
 
 	host->trigger_card_event = true;
 	mmc_detect_change(host, msecs_to_jiffies(200));
@@ -76,6 +81,15 @@ EXPORT_SYMBOL(mmc_gpio_get_ro);
 int mmc_gpio_get_cd(struct mmc_host *host)
 {
 	struct mmc_gpio *ctx = host->slot.handler_priv;
+	int ret;
+
+	if (host->extcon) {
+		ret =  extcon_get_state(host->extcon, EXTCON_MECHANICAL);
+		if (ret < 0)
+			dev_err(mmc_dev(host), "%s: Extcon failed to check card state, ret=%d\n",
+					__func__, ret);
+		return ret;
+	}
 
 	if (!ctx || !ctx->cd_gpio)
 		return -ENOSYS;
@@ -118,6 +132,27 @@ int mmc_gpio_request_ro(struct mmc_host *host, unsigned int gpio)
 }
 EXPORT_SYMBOL(mmc_gpio_request_ro);
 
+void mmc_gpiod_free_cd_irq(struct mmc_host *host)
+{
+	devm_free_irq(host->parent, host->slot.cd_irq, host);
+}
+EXPORT_SYMBOL(mmc_gpiod_free_cd_irq);
+
+void mmc_gpiod_restore_cd_irq(struct mmc_host *host)
+{
+	struct mmc_gpio *ctx = host->slot.handler_priv;
+	int irq = host->slot.cd_irq;
+
+	if (irq >= 0) {
+		devm_request_threaded_irq(host->parent, irq,
+			NULL, ctx->cd_gpio_isr,
+			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
+			IRQF_ONESHOT,
+			ctx->cd_label, host);
+	}
+}
+EXPORT_SYMBOL(mmc_gpiod_restore_cd_irq);
+
 void mmc_gpiod_request_cd_irq(struct mmc_host *host)
 {
 	struct mmc_gpio *ctx = host->slot.handler_priv;
@@ -155,6 +190,53 @@ void mmc_gpiod_request_cd_irq(struct mmc_host *host)
 		host->slot.cd_wake_enabled = true;
 }
 EXPORT_SYMBOL(mmc_gpiod_request_cd_irq);
+
+static int mmc_card_detect_notifier(struct notifier_block *nb,
+				       unsigned long event, void *ptr)
+{
+	struct mmc_host *host = container_of(nb, struct mmc_host,
+					     card_detect_nb);
+
+	host->trigger_card_event = true;
+	mmc_detect_change(host, 0);
+
+	return NOTIFY_DONE;
+}
+
+void mmc_register_extcon(struct mmc_host *host)
+{
+	struct extcon_dev *extcon = host->extcon;
+	int err;
+
+	if (!extcon)
+		return;
+
+	host->card_detect_nb.notifier_call = mmc_card_detect_notifier;
+	err = extcon_register_notifier(extcon, EXTCON_MECHANICAL,
+				       &host->card_detect_nb);
+	if (err) {
+		dev_err(mmc_dev(host), "%s: extcon_register_notifier() failed ret=%d\n",
+			__func__, err);
+		host->caps |= MMC_CAP_NEEDS_POLL;
+	}
+}
+EXPORT_SYMBOL(mmc_register_extcon);
+
+void mmc_unregister_extcon(struct mmc_host *host)
+{
+	struct extcon_dev *extcon = host->extcon;
+	int err;
+
+	if (!extcon)
+		return;
+
+	err = extcon_unregister_notifier(extcon, EXTCON_MECHANICAL,
+					 &host->card_detect_nb);
+	if (err)
+		dev_err(mmc_dev(host), "%s: extcon_unregister_notifier() failed ret=%d\n",
+			__func__, err);
+}
+EXPORT_SYMBOL(mmc_unregister_extcon);
 
 /* Register an alternate interrupt service routine for
  * the card-detect GPIO.

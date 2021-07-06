@@ -96,8 +96,8 @@ config USB_GADGET_DEBUG_FS
 	   to conserve kernel memory, say "N".
 
 config USB_GADGET_VBUS_DRAW
-	int "Maximum VBUS Power usage (2-500 mA)"
-	range 2 500
+	int "Maximum VBUS Power usage (2-900 mA)"
+	range 2 900
 	default 2
 	help
 	   Some devices need to draw power from USB when they are
@@ -106,7 +106,9 @@ config USB_GADGET_VBUS_DRAW
 	   such as an AC adapter or batteries.
 
 	   Enter the maximum power your device draws through USB, in
-	   milliAmperes.  The permitted range of values is 2 - 500 mA;
+	   milliAmperes.  The permitted range of values depends on the
+	   connected speed: for SuperSpeed and up it is 2 - 900 mA, but
+	   connections at High Speed or slower will be capped at 500 mA;
 	   0 mA would be legal, but can make some hosts misbehave.
 
 	   This value will be used except for system-specific gadget
@@ -182,7 +184,13 @@ config USB_F_EEM
 config USB_F_SUBSET
 	tristate
 
+config USB_RNDIS
+	tristate
+
 config USB_F_RNDIS
+	tristate
+
+config USB_F_QCRNDIS
 	tristate
 
 config USB_F_MASS_STORAGE
@@ -215,11 +223,44 @@ config USB_F_PRINTER
 config USB_F_TCM
 	tristate
 
+config USB_F_MTP
+	tristate
+
+config USB_F_PTP
+        tristate
+
 config USB_F_AUDIO_SRC
 	tristate
 
 config USB_F_ACC
 	tristate
+
+config USB_F_DIAG
+	tristate
+
+config USB_F_CDEV
+	tristate
+
+config USB_F_CCID
+	tristate
+
+config USB_F_GSI
+	tristate
+
+config USB_F_QDSS
+	tristate
+
+config USB_F_IPC
+	tristate
+
+config USB_F_MDM_DATA
+	tristate
+
+config USB_F_RMNET_BAM
+	tristate
+
+config USB_F_MBIM_BAM
+        tristate
 
 # this first set of drivers all depend on bulk-capable hardware.
 
@@ -298,11 +339,21 @@ config USB_CONFIGFS_ECM_SUBSET
 	  On hardware that can't implement the full protocol,
 	  a simple CDC subset is used, placing fewer demands on USB.
 
+config USB_CONFIGFS_QCRNDIS
+	bool "QCRNDIS"
+	depends on USB_CONFIGFS
+	depends on NET
+	depends on RNDIS_IPA
+	select USB_U_ETHER
+	select USB_RNDIS
+	select USB_F_QCRNDIS
+
 config USB_CONFIGFS_RNDIS
 	bool "RNDIS"
 	depends on USB_CONFIGFS
 	depends on NET
 	select USB_U_ETHER
+	select USB_RNDIS
 	select USB_F_RNDIS
 	help
 	   Microsoft Windows XP bundles the "Remote NDIS" (RNDIS) protocol,
@@ -313,6 +364,30 @@ config USB_CONFIGFS_RNDIS
 	   as the "driver info file".  For versions of MS-Windows older than
 	   XP, you'll need to download drivers from Microsoft's website; a URL
 	   is given in comments found in that info file.
+
+config USB_CONFIGFS_RMNET_BAM
+	bool "RMNET_BAM"
+	depends on USB_CONFIGFS
+	select USB_F_RMNET_BAM
+	help
+	   RmNet interface is a new logical device in QMI framework for data
+	   services. RmNet in accordance with QMI architecture uses Data I/O
+	   channel for IP data transfer and control I/O channel for QMI
+	   messaging (functionality similar to AT commands).
+	   RmNet interface is an alternative to standard CDC-ECM and windows
+	   RNDIS.
+
+config USB_CONFIGFS_MBIM_BAM
+        bool "MBIM_BAM"
+        depends on USB_CONFIGFS
+        select USB_F_MBIM_BAM
+	help
+	   Mbim interface is a new logical device in QMI framework for data
+	   services. Mbim in accordance with QMI architecture uses Data I/O
+	   channel for IP data transfer and control I/O channel for QMI
+	   messaging (functionality similar to AT commands).
+	   Mbim interface is an alternative to standard CDC-ECM and windows
+	   RNDIS.
 
 config USB_CONFIGFS_EEM
 	bool "Ethernet Emulation Model (EEM)"
@@ -375,6 +450,20 @@ config USB_CONFIGFS_F_FS
 	  of composite gadgets such that some of the functions are
 	  implemented in kernel space (for instance Ethernet, serial or
 	  mass storage) and other are implemented in user space.
+
+config USB_CONFIGFS_F_MTP
+	boolean "MTP gadget"
+	depends on USB_CONFIGFS
+	select USB_F_MTP
+	help
+	  USB gadget MTP support
+
+config USB_CONFIGFS_F_PTP
+	boolean "PTP gadget"
+	depends on USB_CONFIGFS && USB_CONFIGFS_F_MTP
+	select USB_F_PTP
+	help
+	  USB gadget PTP support
 
 config USB_CONFIGFS_F_ACC
 	boolean "Accessory gadget"
@@ -514,6 +603,75 @@ config USB_CONFIGFS_F_TCM
 	  interface 0 (primary) and UAS is on alternative interface 1.
 	  Both protocols can work on USB2.0 and USB3.0.
 	  UAS utilizes the USB 3.0 feature called streams support.
+
+config USB_CONFIGFS_F_DIAG
+	bool "USB Diag function"
+	select USB_F_DIAG
+	depends on USB_CONFIGFS
+	help
+	  Diag function driver enables support for Qualcomm diagnostics
+	  port over USB.
+
+config USB_CONFIGFS_F_CDEV
+	bool "USB Serial Character function"
+	select USB_F_CDEV
+	depends on USB_CONFIGFS
+	help
+	  The serial character function is a generic function driver that
+	  exposes a pair of bulk IN and OUT endpoints which are backed by
+	  a character device and mapped to its read/write routines. The
+	  function also supports a single interrupt IN endpoint for
+	  asynchronous notification to the host. This driver is typically
+	  used to support DUN/NMEA functions.
+
+config USB_CONFIGFS_F_CCID
+	bool "USB CCID function"
+	select USB_F_CCID
+	depends on USB_CONFIGFS
+	help
+	  The Chip Card Interface Device (CCID) function implements a USB
+	  interface that exposes a standard CSCID class that consists of a
+	  pair of bulk IN and OUT endpoints and a single interrupt IN
+	  endpoint. This driver provides a character device interface
+	  allowing a userspace component to be able to provide the
+	  implementation necessary to interface with the smartcard.
+
+config USB_CONFIGFS_F_GSI
+	bool "USB GSI function"
+	select USB_F_GSI
+	select USB_RNDIS
+	select USB_U_ETHER
+	depends on USB_CONFIGFS
+	help
+	  The GSI function supports the IPA Generic Software Interface found
+	  on various Qualcomm SoCs. This provides a hardware accelerated
+	  datapath for various tethered data functions, such as RmNet, RNDIS,
+	  MBIM, and CDC ECM. The function is configurable when instantiating
+	  through ConfigFS. This driver can be used instead of the standard
+	  implementations in case your hardware supports this.
+
+config USB_CONFIGFS_F_QDSS
+	bool "USB QDSS function"
+	select USB_F_QDSS
+	depends on USB_CONFIGFS
+	help
+	  USB QDSS function driver to get hwtracing related data over USB.
+
+config USB_CONFIGFS_F_IPC
+	bool "USB IPC function"
+	select USB_F_IPC
+	depends on USB_CONFIGFS
+	help
+	  IPC function driver enables support for IPC messages port over USB.
+	  This driver provides USB gadget access to the QRTR USB device mode
+	  transport.
+
+config USB_CONFIGFS_F_MDM_DATA
+	bool "USB QTI Modem Data function"
+	select USB_F_MDM_DATA
+	depends on USB_CONFIGFS && USB_QTI_MDM_DATA_BRIDGE
+	help
+	  USB QTI modem data function driver.
 
 source "drivers/usb/gadget/legacy/Kconfig"
 

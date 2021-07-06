@@ -495,6 +495,56 @@ static void __init free_highpages(void)
 #endif
 }
 
+#define MLK(b, t) (b), (t), (((t) - (b)) >> 10)
+#define MLM(b, t) (b), (t), (((t) - (b)) >> 20)
+#define MLK_ROUNDUP(b, t) (b), (t), (DIV_ROUND_UP(((t) - (b)), SZ_1K))
+
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+static void print_vmalloc_lowmem_info(void)
+{
+	struct memblock_region *reg, *prev_reg = NULL;
+
+	pr_notice(
+		"	   vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+		MLM((unsigned long)high_memory, VMALLOC_END));
+
+	for_each_memblock_rev(memory, reg) {
+		phys_addr_t start_phys = reg->base;
+		phys_addr_t end_phys = reg->base + reg->size;
+
+		if (start_phys > arm_lowmem_limit)
+			continue;
+
+		if (end_phys > arm_lowmem_limit)
+			end_phys = arm_lowmem_limit;
+
+		if (prev_reg == NULL) {
+			prev_reg = reg;
+
+			pr_notice(
+			"	   lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+			MLM((unsigned long)__va(start_phys),
+			(unsigned long)__va(end_phys)));
+
+			continue;
+		}
+
+		pr_notice(
+		"	   vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+		MLM((unsigned long)__va(end_phys),
+		(unsigned long)__va(prev_reg->base)));
+
+
+		pr_notice(
+		"	   lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+		MLM((unsigned long)__va(start_phys),
+		(unsigned long)__va(end_phys)));
+
+		prev_reg = reg;
+	}
+}
+#endif
+
 /*
  * mem_init() marks the free areas in the mem_map and tells us how much
  * memory is free.  This is done after various parts of the system have
@@ -523,9 +573,6 @@ void __init mem_init(void)
 
 	mem_init_print_info(NULL);
 
-#define MLK(b, t) b, t, ((t) - (b)) >> 10
-#define MLM(b, t) b, t, ((t) - (b)) >> 20
-#define MLK_ROUNDUP(b, t) b, t, DIV_ROUND_UP(((t) - (b)), SZ_1K)
 
 	pr_notice("Virtual kernel memory layout:\n"
 			"    vector  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
@@ -533,51 +580,52 @@ void __init mem_init(void)
 			"    DTCM    : 0x%08lx - 0x%08lx   (%4ld kB)\n"
 			"    ITCM    : 0x%08lx - 0x%08lx   (%4ld kB)\n"
 #endif
-			"    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n"
-			"    vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n"
-			"    lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n"
-#ifdef CONFIG_HIGHMEM
-			"    pkmap   : 0x%08lx - 0x%08lx   (%4ld MB)\n"
-#endif
-#ifdef CONFIG_MODULES
-			"    modules : 0x%08lx - 0x%08lx   (%4ld MB)\n"
-#endif
-			"      .text : 0x%p" " - 0x%p" "   (%4td kB)\n"
-			"      .init : 0x%p" " - 0x%p" "   (%4td kB)\n"
-			"      .data : 0x%p" " - 0x%p" "   (%4td kB)\n"
-			"       .bss : 0x%p" " - 0x%p" "   (%4td kB)\n",
-
-			MLK(VECTORS_BASE, VECTORS_BASE + PAGE_SIZE),
+			"    fixmap  : 0x%08lx - 0x%08lx   (%4ld kB)\n",
+			MLK(UL(CONFIG_VECTORS_BASE), UL(CONFIG_VECTORS_BASE) +
+				(PAGE_SIZE)),
 #ifdef CONFIG_HAVE_TCM
 			MLK(DTCM_OFFSET, (unsigned long) dtcm_end),
 			MLK(ITCM_OFFSET, (unsigned long) itcm_end),
 #endif
-			MLK(FIXADDR_START, FIXADDR_END),
+			MLK(FIXADDR_START, FIXADDR_END));
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+	print_vmalloc_lowmem_info();
+#else
+	pr_notice(
+		   "    vmalloc : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+		   "    lowmem  : 0x%08lx - 0x%08lx   (%4ld MB)\n",
 			MLM(VMALLOC_START, VMALLOC_END),
-			MLM(PAGE_OFFSET, (unsigned long)high_memory),
-#ifdef CONFIG_HIGHMEM
-			MLM(PKMAP_BASE, (PKMAP_BASE) + (LAST_PKMAP) *
-				(PAGE_SIZE)),
+			MLM(PAGE_OFFSET, (unsigned long)high_memory));
 #endif
-#ifdef CONFIG_MODULES
-			MLM(MODULES_VADDR, MODULES_END),
+#if IS_ENABLED(CONFIG_HIGHMEM)
+	pr_notice(
+		   "    pkmap   : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+		   MLM(PKMAP_BASE, (PKMAP_BASE) + (LAST_PKMAP) *
+							(PAGE_SIZE)));
 #endif
-
+#if IS_ENABLED(CONFIG_MODULES)
+	pr_notice(
+		   "    modules : 0x%08lx - 0x%08lx   (%4ld MB)\n",
+		   MLM(MODULES_VADDR, MODULES_END));
+#endif
+	pr_notice(
+		   "      .text : 0x%pK - 0x%pK    (%4d kB)\n"
+		   "      .init : 0x%pK - 0x%pK    (%4d kB)\n"
+		   "      .data : 0x%pK - 0x%pK    (%4d kB)\n"
+		   "       .bss : 0x%pK - 0x%pK    (%4d kB)\n",
 			MLK_ROUNDUP(_text, _etext),
 			MLK_ROUNDUP(__init_begin, __init_end),
 			MLK_ROUNDUP(_sdata, _edata),
 			MLK_ROUNDUP(__bss_start, __bss_stop));
-
-#undef MLK
-#undef MLM
-#undef MLK_ROUNDUP
 
 	/*
 	 * Check boundaries twice: Some fundamental inconsistencies can
 	 * be detected at build time already.
 	 */
 #ifdef CONFIG_MMU
+#ifndef CONFIG_MODULES_USE_VMALLOC
 	BUILD_BUG_ON(TASK_SIZE				> MODULES_VADDR);
+#endif
 	BUG_ON(TASK_SIZE 				> MODULES_VADDR);
 #endif
 
@@ -598,6 +646,10 @@ void __init mem_init(void)
 }
 
 #ifdef CONFIG_STRICT_KERNEL_RWX
+#undef MLK
+#undef MLM
+#undef MLK_ROUNDUP
+
 struct section_perm {
 	const char *name;
 	unsigned long start;
@@ -605,6 +657,9 @@ struct section_perm {
 	pmdval_t mask;
 	pmdval_t prot;
 	pmdval_t clear;
+	pteval_t ptemask;
+	pteval_t pteprot;
+	pteval_t pteclear;
 };
 
 /* First section-aligned location at or after __start_rodata. */
@@ -618,6 +673,8 @@ static struct section_perm nx_perms[] = {
 		.end	= (unsigned long)_stext,
 		.mask	= ~PMD_SECT_XN,
 		.prot	= PMD_SECT_XN,
+		.ptemask = ~L_PTE_XN,
+		.pteprot = L_PTE_XN,
 	},
 	/* Make init RW (set NX). */
 	{
@@ -626,6 +683,8 @@ static struct section_perm nx_perms[] = {
 		.end	= (unsigned long)_sdata,
 		.mask	= ~PMD_SECT_XN,
 		.prot	= PMD_SECT_XN,
+		.ptemask = ~L_PTE_XN,
+		.pteprot = L_PTE_XN,
 	},
 	/* Make rodata NX (set RO in ro_perms below). */
 	{
@@ -634,6 +693,8 @@ static struct section_perm nx_perms[] = {
 		.end    = (unsigned long)__init_begin,
 		.mask   = ~PMD_SECT_XN,
 		.prot   = PMD_SECT_XN,
+		.ptemask = ~L_PTE_XN,
+		.pteprot = L_PTE_XN,
 	},
 };
 
@@ -651,6 +712,8 @@ static struct section_perm ro_perms[] = {
 		.prot   = PMD_SECT_APX | PMD_SECT_AP_WRITE,
 		.clear  = PMD_SECT_AP_WRITE,
 #endif
+		.ptemask = ~L_PTE_RDONLY,
+		.pteprot = L_PTE_RDONLY,
 	},
 };
 
@@ -659,6 +722,38 @@ static struct section_perm ro_perms[] = {
  * copied into each mm). During startup, this is the init_mm. Is only
  * safe to be called with preemption disabled, as under stop_machine().
  */
+struct pte_data {
+	pteval_t mask;
+	pteval_t val;
+};
+
+static int __pte_update(pte_t *ptep, pgtable_t token, unsigned long addr,
+			void *d)
+{
+	struct pte_data *data = d;
+	pte_t pte = *ptep;
+
+	pte = __pte((pte_val(*ptep) & data->mask) | data->val);
+	set_pte_ext(ptep, pte, 0);
+
+	return 0;
+}
+
+static inline void pte_update(unsigned long addr, pteval_t mask,
+				  pteval_t prot, struct mm_struct *mm)
+{
+	struct pte_data data;
+	struct mm_struct *apply_mm = mm;
+
+	data.mask = mask;
+	data.val = prot;
+
+	if (addr >= PAGE_OFFSET)
+		apply_mm = &init_mm;
+	apply_to_page_range(apply_mm, addr, SECTION_SIZE, __pte_update, &data);
+	flush_tlb_kernel_range(addr, addr + SECTION_SIZE);
+}
+
 static inline void section_update(unsigned long addr, pmdval_t mask,
 				  pmdval_t prot, struct mm_struct *mm)
 {
@@ -707,11 +802,21 @@ void set_section_perms(struct section_perm *perms, int n, bool set,
 
 		for (addr = perms[i].start;
 		     addr < perms[i].end;
-		     addr += SECTION_SIZE)
-			section_update(addr, perms[i].mask,
-				set ? perms[i].prot : perms[i].clear, mm);
-	}
+		     addr += SECTION_SIZE) {
+			pmd_t *pmd;
 
+			pmd = pmd_offset(pud_offset(pgd_offset(mm, addr),
+						addr), addr);
+			if (pmd_bad(*pmd))
+				section_update(addr, perms[i].mask,
+					set ? perms[i].prot : perms[i].clear,
+					mm);
+			else
+				pte_update(addr, perms[i].ptemask,
+				     set ? perms[i].pteprot : perms[i].pteclear,
+				     mm);
+		}
+	}
 }
 
 /**

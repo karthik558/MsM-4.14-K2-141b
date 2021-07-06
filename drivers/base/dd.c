@@ -27,6 +27,7 @@
 #include <linux/async.h>
 #include <linux/pm_runtime.h>
 #include <linux/pinctrl/devinfo.h>
+#include <linux/platform_device.h>
 
 #include "base.h"
 #include "power/power.h"
@@ -55,6 +56,10 @@ static LIST_HEAD(deferred_probe_pending_list);
 static LIST_HEAD(deferred_probe_active_list);
 static atomic_t deferred_trigger_count = ATOMIC_INIT(0);
 static bool initcalls_done;
+
+/* Save the async probe drivers' name from kernel cmdline */
+#define ASYNC_DRV_NAMES_MAX_LEN	256
+static char async_probe_drv_names[ASYNC_DRV_NAMES_MAX_LEN];
 
 /*
  * In some cases, like suspend to RAM or hibernation, It might be reasonable
@@ -227,23 +232,44 @@ void device_unblock_probing(void)
 	driver_deferred_probe_trigger();
 }
 
+static void enable_trigger_defer_cycle(void)
+{
+	driver_deferred_probe_enable = true;
+	driver_deferred_probe_trigger();
+	/*
+	 * Sort as many dependencies as possible before the next initcall
+	 * level
+	 */
+	flush_work(&deferred_probe_work);
+}
+
 /**
  * deferred_probe_initcall() - Enable probing of deferred devices
  *
  * We don't want to get in the way when the bulk of drivers are getting probed.
  * Instead, this initcall makes sure that deferred probing is delayed until
- * late_initcall time.
+ * all the registered initcall functions at a particular level are completed.
+ * This function is invoked at every *_initcall_sync level.
  */
 static int deferred_probe_initcall(void)
 {
-	driver_deferred_probe_enable = true;
-	driver_deferred_probe_trigger();
-	/* Sort as many dependencies as possible before exiting initcalls */
-	flush_work(&deferred_probe_work);
+	enable_trigger_defer_cycle();
+	driver_deferred_probe_enable = false;
+	return 0;
+}
+arch_initcall_sync(deferred_probe_initcall);
+subsys_initcall_sync(deferred_probe_initcall);
+fs_initcall_sync(deferred_probe_initcall);
+device_initcall_sync(deferred_probe_initcall);
+
+static int deferred_probe_enable_fn(void)
+{
+	/* Enable deferred probing for all time */
+	enable_trigger_defer_cycle();
 	initcalls_done = true;
 	return 0;
 }
-late_initcall(deferred_probe_initcall);
+late_initcall(deferred_probe_enable_fn);
 
 /**
  * device_is_bound() - Check if device is bound to a driver
@@ -559,6 +585,23 @@ int driver_probe_device(struct device_driver *drv, struct device *dev)
 	return ret;
 }
 
+static inline bool cmdline_requested_async_probing(const char *drv_name)
+{
+	return parse_option_str(async_probe_drv_names, drv_name);
+}
+
+/* The option format is "driver_async_probe=drv_name1,drv_name2,..." */
+static int __init save_async_options(char *buf)
+{
+	if (strlen(buf) >= ASYNC_DRV_NAMES_MAX_LEN)
+		printk(KERN_WARNING
+			"Too long list of driver names for 'driver_async_probe'!\n");
+
+	strlcpy(async_probe_drv_names, buf, ASYNC_DRV_NAMES_MAX_LEN);
+	return 0;
+}
+__setup("driver_async_probe=", save_async_options);
+
 bool driver_allows_async_probing(struct device_driver *drv)
 {
 	switch (drv->probe_type) {
@@ -569,6 +612,9 @@ bool driver_allows_async_probing(struct device_driver *drv)
 		return false;
 
 	default:
+		if (cmdline_requested_async_probing(drv->name))
+			return true;
+
 		if (module_requested_async_probing(drv->owner))
 			return true;
 
@@ -752,6 +798,21 @@ void device_initial_probe(struct device *dev)
 	__device_attach(dev, true);
 }
 
+#ifdef CONFIG_PLATFORM_AUTO
+static inline int lock_parent(struct device *dev)
+{
+	if (!dev->parent || dev->bus == &platform_bus_type)
+		return 0;
+
+	return 1;
+}
+#else
+static inline int lock_parent(struct device *dev)
+{
+	return dev->parent ? 1 : 0;
+}
+#endif
+
 static int __driver_attach(struct device *dev, void *data)
 {
 	struct device_driver *drv = data;
@@ -779,13 +840,13 @@ static int __driver_attach(struct device *dev, void *data)
 		return ret;
 	} /* ret > 0 means positive match */
 
-	if (dev->parent)	/* Needed for USB */
+	if (lock_parent(dev))	/* Needed for USB */
 		device_lock(dev->parent);
 	device_lock(dev);
 	if (!dev->driver)
 		driver_probe_device(drv, dev);
 	device_unlock(dev);
-	if (dev->parent)
+	if (lock_parent(dev))
 		device_unlock(dev->parent);
 
 	return 0;

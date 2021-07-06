@@ -406,6 +406,36 @@ config LEDS_PCA963X
 	  LED driver chip accessed via the I2C bus. Supported
 	  devices include PCA9633 and PCA9634
 
+config LEDS_PCA9956B
+	tristate "LED support for PCA9956B I2C chip"
+	depends on LEDS_CLASS
+	depends on I2C
+	help
+	  This option enables support for LEDs connected to the PCA9956B
+	  LED driver chip accessed via the I2C bus. Supported
+	  devices include PCA9956B
+
+config LEDS_QPNP_FLASH_V2
+        tristate "Support for QPNP V2 Flash LEDs"
+        depends on LEDS_CLASS && MFD_SPMI_PMIC
+	select LEDS_TRIGGERS
+        help
+          This driver supports the flash V2 LED functionality of Qualcomm
+          Technologies, Inc. QPNP PMICs.  This driver supports PMICs starting
+          from PMI8998.  It can configure the flash LED target current for
+          several independent channels.  It also supports various over current
+          and over temperature mitigation features.
+
+config LEDS_QPNP_HAPTICS
+	tristate "Haptics support for QPNP PMIC"
+	depends on LEDS_CLASS && MFD_SPMI_PMIC
+	help
+	  This option enables device driver support for the haptics peripheral
+	  found on Qualcomm Technologies, Inc. QPNP PMICs.  The haptic
+	  peripheral is capable of driving both LRA and ERM vibrators.  This
+	  module provides haptic feedback for user actions such as a long press
+	  on the touch screen.
+
 config LEDS_WM831X_STATUS
 	tristate "LED support for status LEDs on WM831x PMICs"
 	depends on LEDS_CLASS
@@ -630,6 +660,15 @@ config LEDS_IS31FL32XX
 	  LED controllers. They are I2C devices with multiple constant-current
 	  channels, each with independent 256-level PWM control.
 
+config LEDS_QCOM_CLK
+	tristate "LED Support for cock controller based PWM drvier"
+	depends on OF && PINCTRL && LEDS_CLASS
+	help
+	  This option enables the driver for clock driven LED.
+	  This driver controls the duty cycle of clocks generated
+	  by Qualcomm Technologies, Inc Chipsets.
+	  It also configures the pinctrl to output the clock.
+
 comment "LED driver for blink(1) USB RGB LED is under Special HID drivers (HID_THINGM)"
 
 config LEDS_BLINKM
@@ -650,6 +689,15 @@ config LEDS_POWERNV
 	  PowerNV platforms. Say 'y' to enable this support in kernel.
 	  To compile this driver as a module, choose 'm' here: the module
 	  will be called leds-powernv.
+
+config LEDS_QTI_TRI_LED
+	tristate "LED support for Qualcomm Technologies, Inc. TRI_LED"
+	depends on LEDS_CLASS && MFD_SPMI_PMIC && PWM && OF
+	help
+	  This driver supports the TRI_LED module found in Qualcomm
+	  Technologies, Inc. PMIC chips. TRI_LED supports 3 LED drivers
+	  at max and each is controlled by a PWM channel used for dimming
+	  or blinking.
 
 config LEDS_SYSCON
 	bool "LED support for LEDs on system controllers"
@@ -695,6 +743,14 @@ config LEDS_NIC78BX
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called leds-nic78bx.
+
+config LEDS_QPNP_VIBRATOR_LDO
+	tristate "Vibrator-LDO support for QPNP PMIC"
+	depends on LEDS_CLASS && MFD_SPMI_PMIC
+	help
+	  This option enables device driver support for the vibrator-ldo
+	  peripheral found on Qualcomm Technologies, Inc. QPNP PMICs.
+	  The vibrator-ldo peripheral is capable of driving ERM vibrators.
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"

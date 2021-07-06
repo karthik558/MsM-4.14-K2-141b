@@ -20,6 +20,8 @@
 
 #include <asm/sysreg.h>
 
+#define ICC_HPPIR1_EL1			sys_reg(3, 0, 12, 12, 2)
+
 #ifndef __ASSEMBLY__
 
 #include <linux/stringify.h>
@@ -79,6 +81,8 @@ static inline u64 gic_read_iar_cavium_thunderx(void)
 static inline void gic_write_pmr(u32 val)
 {
 	write_sysreg_s(val, SYS_ICC_PMR_EL1);
+	/* As per the architecture specification */
+	mb();
 }
 
 static inline void gic_write_ctlr(u32 val)
@@ -96,6 +100,8 @@ static inline void gic_write_grpen1(u32 val)
 static inline void gic_write_sgi1r(u64 val)
 {
 	write_sysreg_s(val, SYS_ICC_SGI1R_EL1);
+	/* As per the architecture specification */
+	mb();
 }
 
 static inline u32 gic_read_sre(void)
@@ -114,8 +120,8 @@ static inline void gic_write_bpr1(u32 val)
 	write_sysreg_s(val, SYS_ICC_BPR1_EL1);
 }
 
-#define gic_read_typer(c)		readq_relaxed(c)
-#define gic_write_irouter(v, c)		writeq_relaxed(v, c)
+#define gic_read_typer(c)		readq_relaxed_no_log(c)
+#define gic_write_irouter(v, c)		writeq_relaxed_no_log(v, c)
 #define gic_read_lpir(c)		readq_relaxed(c)
 #define gic_write_lpir(v, c)		writeq_relaxed(v, c)
 

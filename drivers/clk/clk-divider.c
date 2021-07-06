@@ -257,6 +257,9 @@ static bool _is_best_div(unsigned long rate, unsigned long now,
 {
 	if (flags & CLK_DIVIDER_ROUND_CLOSEST)
 		return abs(rate - now) < abs(rate - best);
+	else if (flags & CLK_DIVIDER_ROUND_KHZ)
+		return (DIV_ROUND_CLOSEST(abs(rate - now), 1000)
+			< DIV_ROUND_CLOSEST(abs(rate - best), 1000));
 
 	return now <= rate && now > best;
 }
@@ -283,6 +286,9 @@ static int clk_divider_bestdiv(struct clk_hw *hw, struct clk_hw *parent,
 	int i, bestdiv = 0;
 	unsigned long parent_rate, best = 0, now, maxdiv;
 	unsigned long parent_rate_saved = *best_parent_rate;
+
+	if (!hw || !parent)
+		return -EINVAL;
 
 	if (!rate)
 		rate = 1;
@@ -436,7 +442,7 @@ static struct clk_hw *_register_divider(struct device *dev, const char *name,
 {
 	struct clk_divider *div;
 	struct clk_hw *hw;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 	int ret;
 
 	if (clk_divider_flags & CLK_DIVIDER_HIWORD_MASK) {

@@ -19,6 +19,7 @@ config ARM
 	select ARCH_USE_BUILTIN_BSWAP
 	select ARCH_USE_CMPXCHG_LOCKREF
 	select ARCH_WANT_IPC_PARSE_VERSION
+	select ARM_PSCI_FW if PM
 	select BUILDTIME_EXTABLE_SORT if MMU
 	select CLONE_BACKWARDS
 	select CPU_PM if (SUSPEND || CPU_IDLE)
@@ -65,6 +66,7 @@ config ARM
 	select HAVE_FTRACE_MCOUNT_RECORD if (!XIP_KERNEL)
 	select HAVE_FUNCTION_GRAPH_TRACER if (!THUMB2_KERNEL)
 	select HAVE_FUNCTION_TRACER if (!XIP_KERNEL)
+	select HAVE_FUTEX_CMPXCHG if FUTEX
 	select HAVE_GCC_PLUGINS
 	select HAVE_GENERIC_DMA_COHERENT
 	select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7))
@@ -127,7 +129,7 @@ if ARM_DMA_USE_IOMMU
 config ARM_DMA_IOMMU_ALIGNMENT
 	int "Maximum PAGE_SIZE order of alignment for DMA IOMMU buffers"
 	range 4 9
-	default 8
+	default 9
 	help
 	  DMA mapping framework by default aligns all buffers to the smallest
 	  PAGE_SIZE order which is greater than or equal to the requested buffer
@@ -238,6 +240,9 @@ config NEED_RET_TO_USER
 	bool
 
 config ARCH_MTD_XIP
+	bool
+
+config ARCH_WANT_KMAP_ATOMIC_FLUSH
 	bool
 
 config VECTORS_BASE
@@ -548,6 +553,34 @@ config ARCH_PXA
 	select SPARSE_IRQ
 	help
 	  Support for Intel/Marvell's PXA2xx/PXA3xx processor line.
+
+config ARCH_QCOM
+       bool "Qualcomm MSM (non-multiplatform)"
+       select ARCH_REQUIRE_GPIOLIB
+       select CPU_V7
+       select AUTO_ZRELADDR
+       select HAVE_SMP
+       select CLKDEV_LOOKUP
+       select GENERIC_CLOCKEVENTS
+       select GENERIC_ALLOCATOR
+       select ARM_GIC
+       select ARM_PATCH_PHYS_VIRT
+       select ARM_HAS_SG_CHAIN
+       select ARCH_HAS_OPP
+       select SOC_BUS
+       select MULTI_IRQ_HANDLER
+       select PM_OPP
+       select SPARSE_IRQ
+       select USE_OF
+       select PINCTRL
+       select ARCH_WANT_KMAP_ATOMIC_FLUSH
+       select MFD_CORE
+       help
+         Support for Qualcomm MSM/QSD based systems.  This runs on the
+         apps processor of the MSM/QSD and depends on a shared memory
+         interface to the modem processor which runs the baseband
+         stack and controls some vital subsystems
+         (clock and power control, etc).
 
 config ARCH_RPC
 	bool "RiscPC"
@@ -1440,6 +1473,12 @@ config PAGE_OFFSET
 	default 0xB0000000 if VMSPLIT_3G_OPT
 	default 0xC0000000
 
+config COMMAND_LINE_SIZE
+	int "Maximum size of the command line."
+	default "1024"
+	help
+	This is the per architecture maximum command line size.
+
 config NR_CPUS
 	int "Maximum number of CPUs (2-32)"
 	range 2 32
@@ -1472,7 +1511,7 @@ config ARCH_NR_GPIO
 	int
 	default 2048 if ARCH_SOCFPGA
 	default 1024 if ARCH_BRCMSTB || ARCH_SHMOBILE || ARCH_TEGRA || \
-		ARCH_ZYNQ
+		ARCH_ZYNQ || ARCH_QCOM
 	default 512 if ARCH_EXYNOS || ARCH_KEYSTONE || SOC_OMAP5 || \
 		SOC_DRA7XX || ARCH_S3C24XX || ARCH_S3C64XX || ARCH_S5PV210
 	default 416 if ARCH_SUNXI
@@ -1690,6 +1729,26 @@ config CPU_SW_DOMAIN_PAN
 	  Their lower 1MB needs to remain accessible for the vectors, but
 	  the remainder of userspace will become appropriately inaccessible.
 
+config MODULES_USE_LONG_CALLS
+	bool
+	help
+	  Use long calls for calling exported symbols.
+
+config MODULES_USE_VMALLOC
+	bool "Put modules into vmalloc area"
+	select MODULES_USE_LONG_CALLS
+	depends on MMU && MODULES
+	depends on !XIP_KERNEL
+	depends on !FUNCTION_TRACER
+	help
+	  Usually modules are loaded into small area prior to the kernel text
+	  because they are linked with the kernel using short calls.
+
+	  This option enables long calls and moves modules into vmalloc area.
+	  This allows to load more modules but adds some perfromance penalty.
+
+	  If unsure, say n.
+
 config HW_PERF_EVENTS
 	def_bool y
 	depends on ARM_PMU
@@ -1868,6 +1927,26 @@ config BUILD_ARM_APPENDED_DTB_IMAGE
 	  Enabling this option will cause a concatenated zImage and list of
 	  DTBs to be built by default (instead of a standalone zImage.)
 	  The image will built in arch/arm/boot/zImage-dtb
+choice
+	prompt "Appended DTB Kernel Image name"
+	depends on BUILD_ARM_APPENDED_DTB_IMAGE
+	default ZIMG_DTB
+	help
+	  Enabling this option will cause a specific kernel image Image or
+	  Image.gz to be used for final image creation.
+	  The image will built in arch/arm/boot/IMAGE-NAME-dtb
+
+	config ZIMG_DTB
+		bool "zImage-dtb"
+	config IMG_DTB
+		bool "Image-dtb"
+endchoice
+
+config BUILD_ARM_APPENDED_KERNEL_IMAGE_NAME
+	string
+	depends on BUILD_ARM_APPENDED_DTB_IMAGE
+	default "zImage-dtb" if ZIMG_DTB
+	default "Image-dtb" if IMG_DTB
 
 config BUILD_ARM_APPENDED_DTB_IMAGE_NAMES
 	string "Default dtb names"
@@ -2074,6 +2153,17 @@ config AUTO_ZRELADDR
 
 config EFI_STUB
 	bool
+
+config ARM_DECOMPRESSOR_LIMIT
+        hex "Limit the decompressor memory area"
+        default 0x3200000
+        help
+          Allows overriding of the memory size that decompressor maps with
+          read, write and execute permissions to avoid speculative prefetch.
+
+          By default ARM_DECOMPRESSOR_LIMIT maps first 1GB of memory
+          with read, write and execute permissions and reset of the memory
+          as strongly ordered.
 
 config EFI
 	bool "UEFI runtime support"

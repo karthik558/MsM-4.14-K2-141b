@@ -8,8 +8,11 @@
 #ifndef LINUX_MMC_CORE_H
 #define LINUX_MMC_CORE_H
 
+#include <linux/interrupt.h>
 #include <linux/completion.h>
 #include <linux/types.h>
+#include <linux/ktime.h>
+#include <linux/blkdev.h>
 
 struct mmc_data;
 struct mmc_request;
@@ -112,6 +115,8 @@ struct mmc_command {
 	unsigned int		busy_timeout;	/* busy detect timeout in ms */
 	/* Set this flag only for blocking sanitize request */
 	bool			sanitize_busy;
+	/* Set this flag only for blocking bkops request */
+	bool			bkops_busy;
 
 	struct mmc_data		*data;		/* data segment associated with cmd */
 	struct mmc_request	*mrq;		/* associated request */
@@ -144,6 +149,7 @@ struct mmc_data {
 	int			sg_count;	/* mapped sg entries */
 	struct scatterlist	*sg;		/* I/O scatter list */
 	s32			host_cookie;	/* host private data */
+	bool			fault_injected; /* fault injected */
 };
 
 struct mmc_host;
@@ -163,9 +169,15 @@ struct mmc_request {
 	 */
 	void			(*recovery_notifier)(struct mmc_request *);
 	struct mmc_host		*host;
+	struct mmc_cmdq_req	*cmdq_req;
 
+	struct request		*req;
 	/* Allow other commands during this ongoing data transfer or busy wait */
 	bool			cap_cmd_during_tfr;
+	ktime_t			io_start;
+#ifdef CONFIG_BLOCK
+	int			lat_hist_enabled;
+#endif
 
 	int			tag;
 #ifdef CONFIG_MMC_CRYPTO
@@ -188,6 +200,42 @@ static inline bool mmc_request_crypto_enabled(const struct mmc_request *mrq)
 #endif
 
 struct mmc_card;
+struct mmc_cmdq_req;
+
+extern int mmc_cmdq_discard_queue(struct mmc_host *host, u32 tasks);
+extern int mmc_cmdq_halt(struct mmc_host *host, bool enable);
+extern int mmc_cmdq_halt_on_empty_queue(struct mmc_host *host);
+extern void mmc_cmdq_post_req(struct mmc_host *host, int tag, int err);
+extern int mmc_cmdq_start_req(struct mmc_host *host,
+			      struct mmc_cmdq_req *cmdq_req);
+extern int mmc_cmdq_prepare_flush(struct mmc_command *cmd);
+extern int mmc_cmdq_wait_for_dcmd(struct mmc_host *host,
+			struct mmc_cmdq_req *cmdq_req);
+extern int mmc_cmdq_erase(struct mmc_cmdq_req *cmdq_req,
+	      struct mmc_card *card, unsigned int from, unsigned int nr,
+	      unsigned int arg);
+extern void mmc_check_bkops(struct mmc_card *card);
+extern void mmc_start_manual_bkops(struct mmc_card *card);
+extern int mmc_set_auto_bkops(struct mmc_card *card, bool enable);
+extern void mmc_flush_detect_work(struct mmc_host *host);
+extern int mmc_cmdq_hw_reset(struct mmc_host *host);
+extern int mmc_try_claim_host(struct mmc_host *host, unsigned int delay);
+
+extern void mmc_get_card(struct mmc_card *card);
+extern void mmc_put_card(struct mmc_card *card);
+extern void __mmc_put_card(struct mmc_card *card);
+extern void mmc_blk_init_bkops_statistics(struct mmc_card *card);
+
+extern void mmc_deferred_scaling(struct mmc_host *host);
+extern void mmc_cmdq_clk_scaling_start_busy(struct mmc_host *host,
+	bool lock_needed);
+extern void mmc_cmdq_clk_scaling_stop_busy(struct mmc_host *host,
+	bool lock_needed, bool is_cmdq_dcmd);
+extern void mmc_cmdq_up_rwsem(struct mmc_host *host);
+extern int mmc_cmdq_down_rwsem(struct mmc_host *host, struct request *rq);
+extern int __mmc_switch_cmdq_mode(struct mmc_command *cmd, u8 set, u8 index,
+				  u8 value, unsigned int timeout_ms,
+				  bool use_busy_signal, bool ignore_timeout);
 
 void mmc_wait_for_req(struct mmc_host *host, struct mmc_request *mrq);
 int mmc_wait_for_cmd(struct mmc_host *host, struct mmc_command *cmd,

@@ -43,6 +43,7 @@
 #include <linux/psci.h>
 #include <linux/sched/task.h>
 #include <linux/mm.h>
+#include <linux/libfdt.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -63,8 +64,15 @@
 #include <asm/efi.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/mmu_context.h>
+#include <asm/system_misc.h>
 
 phys_addr_t __fdt_pointer __initdata;
+
+unsigned int boot_reason;
+EXPORT_SYMBOL(boot_reason);
+
+unsigned int cold_boot;
+EXPORT_SYMBOL(cold_boot);
 
 /*
  * Standard memory resources
@@ -92,10 +100,93 @@ static struct resource mem_res[] = {
  */
 u64 __cacheline_aligned boot_args[4];
 
+unsigned int logical_bootcpu_id __read_mostly;
+EXPORT_SYMBOL(logical_bootcpu_id);
+
+extern void *__init __fixmap_remap_fdt(phys_addr_t dt_phys, int *size,
+				       pgprot_t prot);
+/*
+ * Parse the device tree cpu nodes and enumerate logical cpu number for
+ * the boot cpu based on the mpidr value and reg value from the cpu node.
+ * If the parsing fails at any point, value 0 will be returned which make
+ * sure, we fallback to the default kernel behavior.
+ */
+static unsigned int __init parse_logical_bootcpu(u64 dt_phys)
+{
+	void *fdt;
+	int size, parent, node, len;
+	unsigned int logical_cpu_id = 0;
+	fdt64_t *prop;
+	u64 mpidr, hwid;
+
+	/*
+	 * Try to map the FDT early. If this fails, we simply bail,
+	 * and proceed with logical cpu as 0. We will make another
+	 * attempt at mapping the FDT in setup_machine()
+	 */
+	early_fixmap_init();
+	fdt = __fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
+	if (!fdt)
+		return 0;
+
+	mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
+
+	parent = fdt_path_offset(fdt, "/cpus");
+	if (parent < 0)
+		return 0;
+	/*
+	 * Like of_parse_and_init_cpus(), we assume that the device tree
+	 * entries for the dt nodes are defined in ascending order for
+	 * populating cpu logical map.
+	 */
+	fdt_for_each_subnode(node, fdt, parent) {
+		prop = fdt_getprop_w(fdt, node, "reg", &len);
+		if (!prop || len != sizeof(u64))
+			return 0;
+
+		hwid = fdt64_to_cpu(*prop);
+		if (hwid & ~MPIDR_HWID_BITMASK)
+			return 0;
+
+		/*
+		 * If the cpu node reg value matches the currently active
+		 * processor(boot cpu), we bail out from the loop.
+		 */
+		if (hwid == mpidr)
+			return logical_cpu_id;
+
+		logical_cpu_id++;
+
+		if (logical_cpu_id >= NR_CPUS)
+			return 0;
+	}
+
+	return 0;
+}
+
+DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
+
+/*
+ * smp_processor_id() returns the current processor number which
+ * internally uses per-cpu variable cpu_number. At this stage,
+ * since per-cpu area is still not initialized and the kernel
+ * cannot assume current processor number to be 0. This function
+ * temporarily assigns the current processor to be logical_bootcpu_id,
+ * which is essentially enumerated from the device tree. In later stages
+ * of boot the appropriate values for cpu_number will be assigned with
+ * the call to smp_prepare_cpus().
+ */
+static inline void fix_smp_processor_id(void)
+{
+	per_cpu(cpu_number, 0) = logical_bootcpu_id;
+}
+
 void __init smp_setup_processor_id(void)
 {
 	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
-	cpu_logical_map(0) = mpidr;
+	logical_bootcpu_id = parse_logical_bootcpu(__fdt_pointer);
+
+	cpu_logical_map(logical_bootcpu_id) = mpidr;
 
 	/*
 	 * clear __my_cpu_offset on boot CPU to avoid hang caused by
@@ -104,6 +195,8 @@ void __init smp_setup_processor_id(void)
 	 */
 	set_my_cpu_offset(0);
 	pr_info("Booting Linux on physical CPU 0x%lx\n", (unsigned long)mpidr);
+
+	fix_smp_processor_id();
 }
 
 bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
@@ -177,10 +270,15 @@ static void __init smp_build_mpidr_hash(void)
 		pr_warn("Large number of MPIDR hash buckets detected\n");
 }
 
+const char * __init __weak arch_read_machine_name(void)
+{
+	return of_flat_dt_get_machine_name();
+}
+
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	void *dt_virt = fixmap_remap_fdt(dt_phys);
-	const char *name;
+	const char *machine_name;
 
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
@@ -193,12 +291,12 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 			cpu_relax();
 	}
 
-	name = of_flat_dt_get_machine_name();
-	if (!name)
+	machine_name = arch_read_machine_name();
+	if (!machine_name)
 		return;
 
-	pr_info("Machine model: %s\n", name);
-	dump_stack_set_arch_desc("%s (DT)", name);
+	pr_info("Machine: %s\n", machine_name);
+	dump_stack_set_arch_desc("%s (DT)", machine_name);
 }
 
 static void __init request_standard_resources(void)
@@ -241,6 +339,8 @@ static void __init request_standard_resources(void)
 }
 
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
+
+void __init __weak init_random_pool(void) { }
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -334,6 +434,8 @@ void __init setup_arch(char **cmdline_p)
 			"This indicates a broken bootloader or old kernel\n",
 			boot_args[1], boot_args[2], boot_args[3]);
 	}
+
+	init_random_pool();
 }
 
 static int __init topology_init(void)
@@ -351,7 +453,7 @@ static int __init topology_init(void)
 
 	return 0;
 }
-subsys_initcall(topology_init);
+postcore_initcall(topology_init);
 
 /*
  * Dump out kernel offset information on panic.

@@ -360,6 +360,7 @@ static ssize_t mipi_dsi_device_transfer(struct mipi_dsi_device *dsi,
 
 	if (dsi->mode_flags & MIPI_DSI_MODE_LPM)
 		msg->flags |= MIPI_DSI_MSG_USE_LPM;
+	msg->flags |= MIPI_DSI_MSG_LASTCOMMAND;
 
 	return ops->transfer(dsi->host, msg);
 }
@@ -393,6 +394,7 @@ bool mipi_dsi_packet_format_is_short(u8 type)
 	case MIPI_DSI_DCS_SHORT_WRITE_PARAM:
 	case MIPI_DSI_DCS_READ:
 	case MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE:
+	case MIPI_DSI_COMPRESSION_MODE:
 		return true;
 	}
 
@@ -424,6 +426,7 @@ bool mipi_dsi_packet_format_is_long(u8 type)
 	case MIPI_DSI_PACKED_PIXEL_STREAM_18:
 	case MIPI_DSI_PIXEL_STREAM_3BYTE_18:
 	case MIPI_DSI_PACKED_PIXEL_STREAM_24:
+	case MIPI_DSI_PPS:
 		return true;
 	}
 
@@ -454,7 +457,7 @@ int mipi_dsi_create_packet(struct mipi_dsi_packet *packet,
 		return -EINVAL;
 
 	memset(packet, 0, sizeof(*packet));
-	packet->header[0] = ((msg->channel & 0x3) << 6) | (msg->type & 0x3f);
+	packet->header[2] = ((msg->channel & 0x3) << 6) | (msg->type & 0x3f);
 
 	/* TODO: compute ECC if hardware support is not available */
 
@@ -466,16 +469,16 @@ int mipi_dsi_create_packet(struct mipi_dsi_packet *packet,
 	 * and 2.
 	 */
 	if (mipi_dsi_packet_format_is_long(msg->type)) {
-		packet->header[1] = (msg->tx_len >> 0) & 0xff;
-		packet->header[2] = (msg->tx_len >> 8) & 0xff;
+		packet->header[0] = (msg->tx_len >> 0) & 0xff;
+		packet->header[1] = (msg->tx_len >> 8) & 0xff;
 
 		packet->payload_length = msg->tx_len;
 		packet->payload = msg->tx_buf;
 	} else {
 		const u8 *tx = msg->tx_buf;
 
-		packet->header[1] = (msg->tx_len > 0) ? tx[0] : 0;
-		packet->header[2] = (msg->tx_len > 1) ? tx[1] : 0;
+		packet->header[0] = (msg->tx_len > 0) ? tx[0] : 0;
+		packet->header[1] = (msg->tx_len > 1) ? tx[1] : 0;
 	}
 
 	packet->size = sizeof(packet->header) + packet->payload_length;

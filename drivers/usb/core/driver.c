@@ -1430,10 +1430,10 @@ static void choose_wakeup(struct usb_device *udev, pm_message_t msg)
 	int	w;
 
 	/* Remote wakeup is needed only when we actually go to sleep.
-	 * For things like FREEZE and QUIESCE, if the device is already
+	 * For QUIESCE, if the device is already
 	 * autosuspended then its current wakeup setting is okay.
 	 */
-	if (msg.event == PM_EVENT_FREEZE || msg.event == PM_EVENT_QUIESCE) {
+	if (msg.event == PM_EVENT_QUIESCE) {
 		if (udev->state != USB_STATE_SUSPENDED)
 			udev->do_remote_wakeup = 0;
 		return;
@@ -1456,6 +1456,9 @@ static void choose_wakeup(struct usb_device *udev, pm_message_t msg)
 int usb_suspend(struct device *dev, pm_message_t msg)
 {
 	struct usb_device	*udev = to_usb_device(dev);
+
+	if (udev->bus->skip_resume && udev->state == USB_STATE_SUSPENDED)
+		return 0;
 
 	unbind_no_pm_drivers_interfaces(udev);
 
@@ -1485,6 +1488,15 @@ int usb_resume(struct device *dev, pm_message_t msg)
 {
 	struct usb_device	*udev = to_usb_device(dev);
 	int			status;
+
+	/*
+	 * Some buses would like to keep their devices in suspend
+	 * state after system resume.  Their resume happen when
+	 * a remote wakeup is detected or interface driver start
+	 * I/O.
+	 */
+	if (udev->bus->skip_resume)
+		return 0;
 
 	/* For all calls, take the device back to full power and
 	 * tell the PM core in case it was autosuspended previously.

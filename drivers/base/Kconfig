@@ -1,6 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0
 menu "Generic Driver Options"
 
+config PLATFORM_AUTO
+	bool "Support automotive platform features"
+	default n
+	help
+	  Automotive market has aggressive requirement on booting
+	  KPI. So we need to remove anything that blocks us from
+	  booting linux in parallel. With this config, the big
+	  lock for platform driver probe will be removed.
+
+	  If you are unsure about this, Say N here.
+
 config UEVENT_HELPER
 	bool "Support for uevent helper"
 	default y
@@ -163,6 +174,11 @@ config FW_LOADER_USER_HELPER_FALLBACK
 	  been deprecated upstream.
 
 	  If you are unsure about this, say N here.
+
+config FW_CACHE
+       bool "Enable firmware caching during suspend"
+       depends on PM_SLEEP
+       default n
 
 config WANT_DEV_COREDUMP
 	bool

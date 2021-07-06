@@ -81,6 +81,9 @@
 extern phys_addr_t arm64_dma_phys_limit;
 #define ARCH_LOW_ADDRESS_LIMIT	(arm64_dma_phys_limit - 1)
 
+extern unsigned int boot_reason;
+extern unsigned int cold_boot;
+
 struct debug_info {
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	/* Have we suspended stepping by a debugger? */
@@ -219,20 +222,20 @@ extern struct task_struct *cpu_switch_to(struct task_struct *prev,
 #define ARCH_HAS_PREFETCH
 static inline void prefetch(const void *ptr)
 {
-	asm volatile("prfm pldl1keep, %a0\n" : : "p" (ptr));
+	asm volatile("prfm pldl1keep, [%x0]\n" : : "r" (ptr));
 }
 
 #define ARCH_HAS_PREFETCHW
 static inline void prefetchw(const void *ptr)
 {
-	asm volatile("prfm pstl1keep, %a0\n" : : "p" (ptr));
+	asm volatile("prfm pstl1keep, [%x0]\n" : : "r" (ptr));
 }
 
 #define ARCH_HAS_SPINLOCK_PREFETCH
 static inline void spin_lock_prefetch(const void *ptr)
 {
 	asm volatile(ARM64_LSE_ATOMIC_INSN(
-		     "prfm pstl1strm, %a0",
+		     "prfm pstl1strm, [%x0]",
 		     "nop") : : "p" (ptr));
 }
 

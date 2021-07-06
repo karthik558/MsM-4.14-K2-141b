@@ -142,6 +142,27 @@ int clk_set_phase(struct clk *clk, int degrees);
 int clk_get_phase(struct clk *clk);
 
 /**
+ * clk_set_duty_cycle - adjust the duty cycle ratio of a clock signal
+ * @clk: clock signal source
+ * @num: numerator of the duty cycle ratio to be applied
+ * @den: denominator of the duty cycle ratio to be applied
+ *
+ * Adjust the duty cycle of a clock signal by the specified ratio. Returns 0 on
+ * success, -EERROR otherwise.
+ */
+int clk_set_duty_cycle(struct clk *clk, unsigned int num, unsigned int den);
+
+/**
+ * clk_get_duty_cycle - return the duty cycle ratio of a clock signal
+ * @clk: clock signal source
+ * @scale: scaling factor to be applied to represent the ratio as an integer
+ *
+ * Returns the duty cycle ratio multiplied by the scale provided, otherwise
+ * returns -EERROR.
+ */
+int clk_get_scaled_duty_cycle(struct clk *clk, unsigned int scale);
+
+/**
  * clk_is_match - check if two clk's point to the same hardware clock
  * @p: clk compared against q
  * @q: clk compared against p
@@ -181,6 +202,20 @@ static inline long clk_set_phase(struct clk *clk, int phase)
 static inline long clk_get_phase(struct clk *clk)
 {
 	return -ENOTSUPP;
+}
+
+#ifndef CONFIG_COMMON_CLK_MSM
+static inline int clk_set_duty_cycle(struct clk *clk, unsigned int num,
+				     unsigned int den)
+{
+	return -ENOTSUPP;
+}
+#endif
+
+static inline unsigned int clk_get_scaled_duty_cycle(struct clk *clk,
+						     unsigned int scale)
+{
+	return 0;
 }
 
 static inline bool clk_is_match(const struct clk *p, const struct clk *q)
@@ -547,6 +582,15 @@ struct clk *clk_get_parent(struct clk *clk);
  */
 struct clk *clk_get_sys(const char *dev_id, const char *con_id);
 
+/**
+ * clk_set_flags - set the custom HW specific flags for this clock
+ * @clk: clock source
+ * @flags: custom flags which would be hardware specific.
+ *
+ * Returns success 0 or negative errno.
+ */
+int clk_set_flags(struct clk *clk, unsigned long flags);
+
 #else /* !CONFIG_HAVE_CLK */
 
 static inline struct clk *clk_get(struct device *dev, const char *id)
@@ -679,7 +723,7 @@ static inline void clk_bulk_disable_unprepare(int num_clks,
 	clk_bulk_unprepare(num_clks, clks);
 }
 
-#if defined(CONFIG_OF) && defined(CONFIG_COMMON_CLK)
+#if defined(CONFIG_OF)
 struct clk *of_clk_get(struct device_node *np, int index);
 struct clk *of_clk_get_by_name(struct device_node *np, const char *name);
 struct clk *of_clk_get_from_provider(struct of_phandle_args *clkspec);

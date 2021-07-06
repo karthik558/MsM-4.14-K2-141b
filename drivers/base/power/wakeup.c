@@ -19,6 +19,9 @@
 #include <linux/interrupt.h>
 #include <linux/wakeup_reason.h>
 #include <trace/events/power.h>
+#include <linux/irq.h>
+#include <linux/interrupt.h>
+#include <linux/irqdesc.h>
 
 #include "power.h"
 
@@ -863,8 +866,9 @@ void pm_get_active_wakeup_sources(char *pending_wakeup_source, size_t max)
 	struct wakeup_source *ws, *last_active_ws = NULL;
 	int len = 0;
 	bool active = false;
+	int srcuidx;
 
-	rcu_read_lock();
+	srcuidx = srcu_read_lock(&wakeup_srcu);
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		if (ws->active && len < max) {
 			if (!active)
@@ -885,7 +889,7 @@ void pm_get_active_wakeup_sources(char *pending_wakeup_source, size_t max)
 				"Last active Wakeup Source: %s",
 				last_active_ws->name);
 	}
-	rcu_read_unlock();
+	srcu_read_unlock(&wakeup_srcu, srcuidx);
 }
 EXPORT_SYMBOL_GPL(pm_get_active_wakeup_sources);
 
@@ -970,19 +974,21 @@ void pm_wakeup_clear(bool reset)
 
 void pm_system_irq_wakeup(unsigned int irq_number)
 {
+	struct irq_desc *desc;
+	const char *name = "null";
+
 	if (pm_wakeup_irq == 0) {
-		struct irq_desc *desc;
-		const char *name = "null";
+		if (msm_show_resume_irq_mask) {
+			desc = irq_to_desc(irq_number);
+			if (desc == NULL)
+				name = "stray irq";
+			else if (desc->action && desc->action->name)
+				name = desc->action->name;
 
-		desc = irq_to_desc(irq_number);
-		if (desc == NULL)
-			name = "stray irq";
-		else if (desc->action && desc->action->name)
-			name = desc->action->name;
+			pr_warn("%s: %d triggered %s\n", __func__,
+					irq_number, name);
 
-		log_irq_wakeup_reason(irq_number);
-		pr_warn("%s: %d triggered %s\n", __func__, irq_number, name);
-
+		}
 		pm_wakeup_irq = irq_number;
 		pm_system_wakeup();
 	}

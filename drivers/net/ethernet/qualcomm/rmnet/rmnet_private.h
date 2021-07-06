@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, 2016-2017 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, 2016-2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,23 +19,27 @@
 #define RMNET_TX_QUEUE_LEN         1000
 
 /* Constants */
-#define RMNET_EGRESS_FORMAT__RESERVED__         BIT(0)
-#define RMNET_EGRESS_FORMAT_MAP                 BIT(1)
-#define RMNET_EGRESS_FORMAT_AGGREGATION         BIT(2)
-#define RMNET_EGRESS_FORMAT_MUXING              BIT(3)
-#define RMNET_EGRESS_FORMAT_MAP_CKSUMV3         BIT(4)
-#define RMNET_EGRESS_FORMAT_MAP_CKSUMV4         BIT(5)
+#define RMNET_EGRESS_FORMAT_AGGREGATION         BIT(31)
+#define RMNET_INGRESS_FORMAT_DL_MARKER_V1       BIT(30)
+#define RMNET_INGRESS_FORMAT_DL_MARKER_V2       BIT(29)
 
-#define RMNET_INGRESS_FIX_ETHERNET              BIT(0)
-#define RMNET_INGRESS_FORMAT_MAP                BIT(1)
-#define RMNET_INGRESS_FORMAT_DEAGGREGATION      BIT(2)
-#define RMNET_INGRESS_FORMAT_DEMUXING           BIT(3)
-#define RMNET_INGRESS_FORMAT_MAP_COMMANDS       BIT(4)
-#define RMNET_INGRESS_FORMAT_MAP_CKSUMV3        BIT(5)
-#define RMNET_INGRESS_FORMAT_MAP_CKSUMV4        BIT(6)
+#define RMNET_INGRESS_FORMAT_DL_MARKER  (RMNET_INGRESS_FORMAT_DL_MARKER_V1 |\
+RMNET_INGRESS_FORMAT_DL_MARKER_V2)
 
-/* Pass the frame up the stack with no modifications to skb->dev */
-#define RMNET_EPMODE_NONE (0)
+/* UL Packet prioritization */
+#define RMNET_EGRESS_FORMAT_PRIORITY            BIT(28)
+
+/* Power save feature*/
+#define RMNET_INGRESS_FORMAT_PS                 BIT(27)
+#define RMNET_FORMAT_PS_NOTIF                   BIT(26)
+
+/* UL Aggregation parameters */
+#define RMNET_PAGE_RECYCLE                      BIT(0)
+
+/* IP-Mux feature */
+#define RMNET_INGRESS_FORMAT_IP_ROUTE           BIT(25)
+#define RMNET_EGRESS_FORMAT_IP_ROUTE            BIT(24)
+
 /* Replace skb->dev to a virtual rmnet device and pass up the stack */
 #define RMNET_EPMODE_VND (1)
 /* Pass the frame directly to another device with dev_queue_xmit() */

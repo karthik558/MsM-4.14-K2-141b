@@ -132,6 +132,16 @@ config QCOM_APCS_IPC
 	  providing an interface for invoking the inter-process communication
 	  signals from the application processor to other masters.
 
+config QCOM_GVM_IPC
+	tristate "Qualcomm Technologies, Inc. GVM IPC driver"
+	depends on ARCH_QCOM
+	help
+	  Say y here to enable support for the GVM IPC mailbox driver,
+	  This driver will providing an interface for invoking the communication
+	  between GVM and primary host through virtual IRQ line. It signals from
+	  the GVM to primary host and primary host will send different signal to
+	  remote sub system.
+
 config TEGRA_HSP_MBOX
 	bool "Tegra HSP (Hardware Synchronization Primitives) Driver"
 	depends on ARCH_TEGRA_186_SOC
@@ -170,4 +180,19 @@ config BCM_FLEXRM_MBOX
 	  Mailbox implementation of the Broadcom FlexRM ring manager,
 	  which provides access to various offload engines on Broadcom
 	  SoCs. Say Y here if you want to use the Broadcom FlexRM.
+
+config QTI_RPMH_MBOX
+	bool "TCS Mailbox for QTI RPMH Communication"
+	depends on ARCH_QCOM
+	help
+	  Support for communication with the hardened-RPM blocks in
+	  Qualcomm Technologies Inc (QTI) SoCs using TCS hardware mailbox.
+
+config MSM_QMP
+         bool "QTI Mailbox Protocol(QMP)"
+         help
+           QMP is a lightweight communication protocol for sending messages to
+           a remote processor. This protocol fits into the Generic Mailbox
+           Framework. QMP uses a mailbox located in shared memory.
+
 endif

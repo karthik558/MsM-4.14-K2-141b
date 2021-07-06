@@ -22,6 +22,7 @@
 #include <linux/kernel.h>
 #include <linux/regmap.h>
 #include <linux/log2.h>
+#include <linux/async.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/compress_driver.h>
@@ -242,6 +243,14 @@
 	.get = xhandler_get, .put = xhandler_put, \
 	.private_value = SOC_DOUBLE_R_VALUE(reg_left, reg_right, xshift, \
 					    xmax, xinvert) }
+#define SOC_SINGLE_MULTI_EXT(xname, xreg, xshift, xmax, xinvert, xcount,\
+	xhandler_get, xhandler_put) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
+	.info = snd_soc_info_multi_ext, \
+	.get = xhandler_get, .put = xhandler_put, \
+	.private_value = (unsigned long)&(struct soc_multi_mixer_control) \
+		{.reg = xreg, .shift = xshift, .rshift = xshift, .max = xmax, \
+		.count = xcount, .platform_max = xmax, .invert = xinvert} }
 #define SOC_SINGLE_EXT_TLV(xname, xreg, xshift, xmax, xinvert,\
 	 xhandler_get, xhandler_put, tlv_array) \
 {	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
@@ -375,6 +384,10 @@
 #define SND_SOC_COMP_ORDER_LATE		1
 #define SND_SOC_COMP_ORDER_LAST		2
 
+/* DAI Link Host Mode Support */
+#define SND_SOC_DAI_LINK_NO_HOST		0x1
+#define SND_SOC_DAI_LINK_OPT_HOST		0x2
+
 /*
  * Bias levels
  *
@@ -483,9 +496,7 @@ int snd_soc_platform_read(struct snd_soc_platform *platform,
 int snd_soc_platform_write(struct snd_soc_platform *platform,
 					unsigned int reg, unsigned int val);
 int soc_new_pcm(struct snd_soc_pcm_runtime *rtd, int num);
-#ifdef CONFIG_SND_SOC_COMPRESS
 int snd_soc_new_compress(struct snd_soc_pcm_runtime *rtd, int num);
-#endif
 
 struct snd_pcm_substream *snd_soc_get_dai_substream(struct snd_soc_card *card,
 		const char *dai_link, int stream);
@@ -576,12 +587,13 @@ int snd_soc_update_bits_locked(struct snd_soc_codec *codec,
 int snd_soc_test_bits(struct snd_soc_codec *codec, unsigned int reg,
 				unsigned int mask, unsigned int value);
 
+void snd_soc_card_change_online_state(struct snd_soc_card *soc_card,
+				      int online);
 #ifdef CONFIG_SND_SOC_AC97_BUS
 struct snd_ac97 *snd_soc_alloc_ac97_codec(struct snd_soc_codec *codec);
 struct snd_ac97 *snd_soc_new_ac97_codec(struct snd_soc_codec *codec,
 	unsigned int id, unsigned int id_mask);
 void snd_soc_free_ac97_codec(struct snd_ac97 *ac97);
-
 int snd_soc_set_ac97_ops(struct snd_ac97_bus_ops *ops);
 int snd_soc_set_ac97_ops_of_reset(struct snd_ac97_bus_ops *ops,
 		struct platform_device *pdev);
@@ -667,6 +679,8 @@ int snd_soc_get_strobe(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol);
 int snd_soc_put_strobe(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol);
+int snd_soc_info_multi_ext(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_info *uinfo);
 
 /**
  * struct snd_soc_jack_pin - Describes a pin to update based on jack detection
@@ -759,6 +773,7 @@ struct snd_soc_pcm_stream {
 	unsigned int channels_min;	/* min channels */
 	unsigned int channels_max;	/* max channels */
 	unsigned int sig_bits;		/* number of bits of content */
+	const char *aif_name;		/* DAPM AIF widget name */
 };
 
 /* SoC audio ops */
@@ -970,6 +985,16 @@ struct snd_soc_platform_driver {
 	int (*pcm_new)(struct snd_soc_pcm_runtime *);
 	void (*pcm_free)(struct snd_pcm *);
 
+	/*
+	 * For platform-caused delay reporting, where the thread blocks waiting
+	 * for the delay amount to be determined.  Defining this will cause the
+	 * ASoC core to skip calling the delay callbacks for all components in
+	 * the runtime.
+	 * Optional.
+	 */
+	snd_pcm_sframes_t (*delay_blk)(struct snd_pcm_substream *,
+		struct snd_soc_dai *);
+
 	/* platform stream pcm ops */
 	const struct snd_pcm_ops *ops;
 
@@ -990,6 +1015,14 @@ struct snd_soc_platform {
 	struct list_head list;
 
 	struct snd_soc_component component;
+};
+
+enum snd_soc_async_ops {
+	ASYNC_DPCM_SND_SOC_OPEN = 1 << 0,
+	ASYNC_DPCM_SND_SOC_CLOSE = 1 << 1,
+	ASYNC_DPCM_SND_SOC_PREPARE = 1 << 2,
+	ASYNC_DPCM_SND_SOC_HW_PARAMS = 1 << 3,
+	ASYNC_DPCM_SND_SOC_FREE = 1 << 4,
 };
 
 struct snd_soc_dai_link {
@@ -1071,6 +1104,12 @@ struct snd_soc_dai_link {
 	/* This DAI link can route to other DAI links at runtime (Frontend)*/
 	unsigned int dynamic:1;
 
+	/*
+	 * This DAI can support no host IO (no pcm data is
+	 * copied to from host)
+	 */
+	unsigned int no_host_mode:2;
+
 	/* DPCM capture and Playback support */
 	unsigned int dpcm_capture:1;
 	unsigned int dpcm_playback:1;
@@ -1083,6 +1122,9 @@ struct snd_soc_dai_link {
 
 	struct list_head list; /* DAI link list of the soc card */
 	struct snd_soc_dobj dobj; /* For topology */
+
+	/* this value determines what all ops can be started asynchronously */
+	enum snd_soc_async_ops async_ops;
 };
 
 struct snd_soc_codec_conf {
@@ -1127,6 +1169,7 @@ struct snd_soc_card {
 
 	struct mutex mutex;
 	struct mutex dapm_mutex;
+	struct mutex dapm_power_mutex;
 
 	bool instantiated;
 
@@ -1236,6 +1279,8 @@ struct snd_soc_pcm_runtime {
 
 	long pmdown_time;
 
+	/* err in case of ops failed */
+	int err_ops;
 	/* runtime devices */
 	struct snd_pcm *pcm;
 	struct snd_compr *compr;
@@ -1293,6 +1338,11 @@ struct soc_bytes_ext {
 struct soc_mreg_control {
 	long min, max;
 	unsigned int regbase, regcount, nbits, invert;
+};
+
+struct soc_multi_mixer_control {
+	int min, max, platform_max, count;
+	unsigned int reg, rreg, shift, rshift, invert;
 };
 
 /* enumerated kcontrol */
@@ -1480,6 +1530,10 @@ int snd_soc_component_update_bits_async(struct snd_soc_component *component,
 void snd_soc_component_async_complete(struct snd_soc_component *component);
 int snd_soc_component_test_bits(struct snd_soc_component *component,
 	unsigned int reg, unsigned int mask, unsigned int value);
+struct snd_soc_component *soc_find_component(
+	const struct device_node *of_node, const char *name);
+struct snd_soc_component *soc_find_component_locked(
+	const struct device_node *of_node, const char *name);
 
 /* component wide operations */
 int snd_soc_component_set_sysclk(struct snd_soc_component *component,

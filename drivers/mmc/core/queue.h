@@ -36,14 +36,12 @@ struct mmc_blk_request {
 /**
  * enum mmc_drv_op - enumerates the operations in the mmc_queue_req
  * @MMC_DRV_OP_IOCTL: ioctl operation
- * @MMC_DRV_OP_IOCTL_RPMB: RPMB-oriented ioctl operation
  * @MMC_DRV_OP_BOOT_WP: write protect boot partitions
  * @MMC_DRV_OP_GET_CARD_STATUS: get card status
  * @MMC_DRV_OP_GET_EXT_CSD: get the EXT CSD from an eMMC card
  */
 enum mmc_drv_op {
 	MMC_DRV_OP_IOCTL,
-	MMC_DRV_OP_IOCTL_RPMB,
 	MMC_DRV_OP_BOOT_WP,
 	MMC_DRV_OP_GET_CARD_STATUS,
 	MMC_DRV_OP_GET_EXT_CSD,
@@ -57,16 +55,31 @@ struct mmc_queue_req {
 	int			drv_op_result;
 	void			*drv_op_data;
 	unsigned int		ioc_count;
+	struct mmc_cmdq_req	cmdq_req;
 };
 
 struct mmc_queue {
 	struct mmc_card		*card;
 	struct task_struct	*thread;
 	struct semaphore	thread_sem;
+	unsigned long		flags;
+#define MMC_QUEUE_SUSPENDED		0
+	int (*issue_fn)(struct mmc_queue *, struct request *);
+	int (*cmdq_issue_fn)(struct mmc_queue *,
+			     struct request *);
+	void (*cmdq_complete_fn)(struct request *);
+	void (*cmdq_error_fn)(struct mmc_queue *);
+	enum blk_eh_timer_return (*cmdq_req_timed_out)(struct request *);
 	bool			suspended;
 	bool			asleep;
 	struct mmc_blk_data	*blkdata;
 	struct request_queue	*queue;
+	struct work_struct	cmdq_err_work;
+
+	struct completion	cmdq_pending_req_done;
+	struct completion	cmdq_shutdown_complete;
+	struct request		*cmdq_req_peeked;
+	void (*cmdq_shutdown)(struct mmc_queue *);
 	/*
 	 * FIXME: this counter is not a very reliable way of keeping
 	 * track of how many requests that are ongoing. Switch to just
@@ -74,14 +87,30 @@ struct mmc_queue {
 	 * associated mmc_queue_req data.
 	 */
 	int			qcnt;
+#ifdef CONFIG_MMC_SIMULATE_MAX_SPEED
+	atomic_t max_write_speed;
+	atomic_t max_read_speed;
+	atomic_t cache_size;
+	/* i/o tracking */
+	atomic_long_t cache_used;
+	unsigned long cache_jiffies;
+#endif
 };
 
 extern int mmc_init_queue(struct mmc_queue *, struct mmc_card *, spinlock_t *,
-			  const char *);
+			  const char *, int);
 extern void mmc_cleanup_queue(struct mmc_queue *);
-extern void mmc_queue_suspend(struct mmc_queue *);
+extern int mmc_queue_suspend(struct mmc_queue *mq, int wait);
 extern void mmc_queue_resume(struct mmc_queue *);
+
 extern unsigned int mmc_queue_map_sg(struct mmc_queue *,
 				     struct mmc_queue_req *);
+extern void mmc_queue_bounce_pre(struct mmc_queue_req *mqrq);
+extern void mmc_queue_bounce_post(struct mmc_queue_req *mqrq);
+
+extern int mmc_access_rpmb(struct mmc_queue *);
+
+extern int mmc_cmdq_init(struct mmc_queue *mq, struct mmc_card *card);
+extern void mmc_cmdq_clean(struct mmc_queue *mq, struct mmc_card *card);
 
 #endif

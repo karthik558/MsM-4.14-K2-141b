@@ -19,6 +19,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 #include <linux/memblock.h>
+#include <linux/memory.h>
 
 #include <asm/sections.h>
 #include <linux/io.h>
@@ -672,7 +673,8 @@ int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 	memblock_dbg("   memblock_free: [%pa-%pa] %pF\n",
 		     &base, &end, (void *)_RET_IP_);
 
-	kmemleak_free_part_phys(base, size);
+	if (base < memblock.current_limit)
+		kmemleak_free_part(__va(base), size);
 	return memblock_remove_range(&memblock.reserved, base, size);
 }
 
@@ -889,7 +891,7 @@ void __init_memblock __next_mem_range(u64 *idx, int nid, ulong flags,
 			r = &type_b->regions[idx_b];
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
-				r->base : ULLONG_MAX;
+				r->base : (phys_addr_t)ULLONG_MAX;
 
 			/*
 			 * if idx_b advanced past idx_a,
@@ -1005,7 +1007,7 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid, ulong flags,
 			r = &type_b->regions[idx_b];
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
-				r->base : ULLONG_MAX;
+				r->base : (phys_addr_t)ULLONG_MAX;
 			/*
 			 * if idx_b advanced past idx_a,
 			 * break out to advance idx_a
@@ -1113,7 +1115,9 @@ static phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
 		 * The min_count is set to 0 so that memblock allocations are
 		 * never reported as leaks.
 		 */
-		kmemleak_alloc_phys(found, size, 0, 0);
+		if (found < memblock.current_limit)
+			kmemleak_alloc(__va(found), size, 0, 0);
+
 		return found;
 	}
 	return 0;
@@ -1123,6 +1127,8 @@ phys_addr_t __init memblock_alloc_range(phys_addr_t size, phys_addr_t align,
 					phys_addr_t start, phys_addr_t end,
 					ulong flags)
 {
+	memblock_dbg("%s: size: %llu align: %llu %pF\n",
+		     __func__, (u64)size, (u64)align, (void *)_RET_IP_);
 	return memblock_alloc_range_nid(size, align, start, end, NUMA_NO_NODE,
 					flags);
 }
@@ -1152,6 +1158,8 @@ again:
 
 phys_addr_t __init __memblock_alloc_base(phys_addr_t size, phys_addr_t align, phys_addr_t max_addr)
 {
+	memblock_dbg("%s: size: %llu align: %llu %pF\n",
+		     __func__, (u64)size, (u64)align, (void *)_RET_IP_);
 	return memblock_alloc_base_nid(size, align, max_addr, NUMA_NO_NODE,
 				       MEMBLOCK_NONE);
 }
@@ -1171,6 +1179,8 @@ phys_addr_t __init memblock_alloc_base(phys_addr_t size, phys_addr_t align, phys
 
 phys_addr_t __init memblock_alloc(phys_addr_t size, phys_addr_t align)
 {
+	memblock_dbg("%s: size: %llu align: %llu %pF\n",
+		     __func__, (u64)size, (u64)align, (void *)_RET_IP_);
 	return memblock_alloc_base(size, align, MEMBLOCK_ALLOC_ACCESSIBLE);
 }
 
@@ -1455,6 +1465,11 @@ static phys_addr_t __init_memblock __find_max_addr(phys_addr_t limit)
 	return max_addr;
 }
 
+phys_addr_t __init_memblock memblock_max_addr(phys_addr_t limit)
+{
+	return __find_max_addr(limit);
+}
+
 void __init memblock_enforce_memory_limit(phys_addr_t limit)
 {
 	phys_addr_t max_addr = (phys_addr_t)ULLONG_MAX;
@@ -1519,7 +1534,8 @@ void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 	memblock_cap_memory_range(0, max_addr);
 }
 
-static int __init_memblock memblock_search(struct memblock_type *type, phys_addr_t addr)
+static int __init_memblock memblock_search(struct memblock_type *type,
+					phys_addr_t addr)
 {
 	unsigned int left = 0, right = type->cnt;
 
@@ -1592,6 +1608,14 @@ int __init_memblock memblock_is_region_memory(phys_addr_t base, phys_addr_t size
 		return 0;
 	return (memblock.memory.regions[idx].base +
 		 memblock.memory.regions[idx].size) >= end;
+}
+
+bool __init_memblock memblock_overlaps_memory(phys_addr_t base,
+					      phys_addr_t size)
+{
+	memblock_cap_size(base, &size);
+
+	return memblock_overlaps_region(&memblock.memory, base, size);
 }
 
 /**
@@ -1720,6 +1744,120 @@ static int __init early_memblock(char *p)
 	return 0;
 }
 early_param("memblock", early_memblock);
+
+#ifdef CONFIG_MEMORY_HOTPLUG
+static phys_addr_t no_hotplug_area[8];
+static phys_addr_t aligned_blocks[32];
+
+static int __init early_no_hotplug_area(char *p)
+{
+	phys_addr_t base, size;
+	int idx = 0;
+	char *endp = p;
+
+	while (1) {
+		base = memparse(endp, &endp);
+		if (base && (*endp == ',')) {
+			size = memparse(endp + 1, &endp);
+			if (size) {
+				no_hotplug_area[idx++] = base;
+				no_hotplug_area[idx++] = base+size;
+
+				if ((*endp == ';') && (idx <= 6))
+					endp++;
+				else
+					break;
+			} else
+				break;
+		} else
+			break;
+	}
+	return 0;
+}
+early_param("no_hotplug_area", early_no_hotplug_area);
+
+static bool __init memblock_in_no_hotplug_area(phys_addr_t addr)
+{
+	int idx = 0;
+
+	while (idx < 8) {
+		if (!no_hotplug_area[idx])
+			break;
+
+		if ((addr + MIN_MEMORY_BLOCK_SIZE <= no_hotplug_area[idx])
+			|| (addr >= no_hotplug_area[idx+1])) {
+			idx += 2;
+			continue;
+		}
+
+		return true;
+	}
+	return false;
+}
+
+static int __init early_dyn_memhotplug(char *p)
+{
+	unsigned long idx = 0;
+	unsigned long old_cnt;
+	phys_addr_t addr, rgn_end;
+	struct memblock_region *rgn;
+	int blk = 0;
+
+	while (idx < memblock.memory.cnt) {
+		old_cnt = memblock.memory.cnt;
+		rgn = &memblock.memory.regions[idx++];
+		addr = ALIGN(rgn->base, MIN_MEMORY_BLOCK_SIZE);
+		rgn_end = rgn->base + rgn->size;
+		while (addr + MIN_MEMORY_BLOCK_SIZE <= rgn_end) {
+			if (!memblock_in_no_hotplug_area(addr)) {
+				aligned_blocks[blk++] = addr;
+				memblock_remove(addr, MIN_MEMORY_BLOCK_SIZE);
+			}
+			addr += MIN_MEMORY_BLOCK_SIZE;
+		}
+		if (old_cnt != memblock.memory.cnt)
+			idx--;
+	}
+	return 0;
+}
+early_param("dyn_memhotplug", early_dyn_memhotplug);
+
+int memblock_dump_aligned_blocks_addr(char *buf)
+{
+	int idx = 0;
+	int size = 0;
+
+	if (aligned_blocks[idx]) {
+		size += snprintf(buf+size, 32, "0x%llx", aligned_blocks[idx]);
+		idx++;
+	}
+
+	while (aligned_blocks[idx]) {
+		size += snprintf(buf+size, 32, ",0x%llx", aligned_blocks[idx]);
+		idx++;
+	}
+	return size;
+}
+
+int memblock_dump_aligned_blocks_num(char *buf)
+{
+	int idx = 0;
+	int size = 0;
+
+	if (aligned_blocks[idx]) {
+		size += snprintf(buf+size, 16, "%d",
+			(int)(aligned_blocks[idx] >> SECTION_SIZE_BITS));
+		idx++;
+	}
+
+	while (aligned_blocks[idx]) {
+		size += snprintf(buf+size, 16, ",%d",
+			(int)(aligned_blocks[idx] >> SECTION_SIZE_BITS));
+		idx++;
+	}
+	return size;
+}
+#endif
 
 #if defined(CONFIG_DEBUG_FS) && !defined(CONFIG_ARCH_DISCARD_MEMBLOCK)
 

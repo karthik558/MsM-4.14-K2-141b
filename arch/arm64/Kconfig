@@ -22,7 +22,24 @@ config ARM64
 	select ARCH_HAS_STRICT_MODULE_RWX
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_HAVE_NMI_SAFE_CMPXCHG if ACPI_APEI_SEA
+	select ARCH_INLINE_READ_LOCK if !PREEMPT
+	select ARCH_INLINE_READ_LOCK_BH if !PREEMPT
+	select ARCH_INLINE_READ_LOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_READ_LOCK_IRQSAVE if !PREEMPT
+	select ARCH_INLINE_READ_UNLOCK if !PREEMPT
+	select ARCH_INLINE_READ_UNLOCK_BH if !PREEMPT
+	select ARCH_INLINE_READ_UNLOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_READ_UNLOCK_IRQRESTORE if !PREEMPT
+	select ARCH_INLINE_WRITE_LOCK if !PREEMPT
+	select ARCH_INLINE_WRITE_LOCK_BH if !PREEMPT
+	select ARCH_INLINE_WRITE_LOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_WRITE_LOCK_IRQSAVE if !PREEMPT
+	select ARCH_INLINE_WRITE_UNLOCK if !PREEMPT
+	select ARCH_INLINE_WRITE_UNLOCK_BH if !PREEMPT
+	select ARCH_INLINE_WRITE_UNLOCK_IRQ if !PREEMPT
+	select ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPT
 	select ARCH_USE_CMPXCHG_LOCKREF
+	select ARCH_USE_QUEUED_RWLOCKS
 	select ARCH_SUPPORTS_MEMORY_FAILURE
 	select ARCH_SUPPORTS_LTO_CLANG
 	select ARCH_SUPPORTS_THINLTO
@@ -42,7 +59,7 @@ config ARM64
 	select ARM_PSCI_FW
 	select BUILDTIME_EXTABLE_SORT
 	select CLONE_BACKWARDS
-	select COMMON_CLK
+	select COMMON_CLK if !ARCH_QCOM
 	select CPU_PM if (SUSPEND || CPU_IDLE)
 	select DCACHE_WORD_ACCESS
 	select EDAC_SUPPORT
@@ -127,6 +144,7 @@ config ARM64
 	select SPARSE_IRQ
 	select SYSCTL_EXCEPTION_TRACE
 	select THREAD_INFO_IN_TASK
+	select ARCH_SUPPORTS_SPECULATIVE_PAGE_FAULT
 	help
 	  ARM 64-bit (AArch64) Linux support.
 
@@ -232,6 +250,17 @@ config NEED_SG_DMA_LENGTH
 config SMP
 	def_bool y
 
+config HOTPLUG_SIZE_BITS
+	int "Memory hotplug block size(29 => 512MB 30 => 1GB)"
+	depends on SPARSEMEM
+	depends on MEMORY_HOTPLUG
+	default 30
+	help
+	 Selects granularity of hotplug memory. Block
+	 size for memory hotplug is represent as a power
+	 of 2.
+	 If unsure, stick with default value.
+
 config SWIOTLB
 	def_bool y
 
@@ -258,6 +287,27 @@ config ARCH_SUPPORTS_UPROBES
 
 config ARCH_PROC_KCORE_TEXT
 	def_bool y
+
+config QTI_GVM
+	bool "Enable virtualization Support for MSM kernel"
+	help
+		This enables support for MSM Kernel based virtual
+		machine for any platform.
+		This helps to enable virtual driver support.
+		This should work on 64bit machines.
+		If you don't know what to do here, say N.
+
+config QTI_GVM_QUIN
+	bool "Enable virtualization Support for MSM kernel required for Quin platform"
+	depends on QTI_GVM
+	select COMMON_CLK
+	select COMMON_CLK_QCOM
+	help
+		This enables support for MSM Kernel based virtual
+		machine for Quin platform.
+		This helps to enable virtual driver support.
+		This should work on 64bit machines.
+		If you don't know what to do here, say N.
 
 source "init/Kconfig"
 
@@ -461,6 +511,34 @@ config ARM64_ERRATUM_1024718
 
 	  If unsure, say Y.
 
+config ARM64_ERRATUM_1286807
+	bool "Cortex-A76: Modification of the translation table for a virtual address might lead to read-after-read ordering violation"
+	default n
+	select ARM64_WORKAROUND_REPEAT_TLBI
+	help
+	  This option adds workaround for ARM Cortex-A76 erratum 1286807
+
+	  On the affected Cortex-A76 cores (r0p0 to r3p0), if a virtual
+	  address for a cacheable mapping of a location is being
+	  accessed by a core while another core is remapping the virtual
+	  address to a new physical page using the recommended
+	  break-before-make sequence, then under very rare circumstances
+	  TLBI+DSB completes before a read using the translation being
+	  invalidated has been observed by other observers. The
+	  workaround repeats the TLBI+DSB operation.
+
+config ARM64_ERRATUM_1188873
+	bool "Cortex-A76: MRC read following MRRC read of specific Generic Timer in AArch32 might give incorrect result"
+	default y
+	help
+	  This option adds work arounds for ARM Cortex-A76 erratum 1188873
+
+	  Affected Cortex-A76 cores (r0p0, r1p0, r2p0) could cause
+	  register corruption when accessing the timer registers from
+	  AArch32 userspace.
+
+	  If unsure, say Y.
+
 config CAVIUM_ERRATUM_22375
 	bool "Cavium erratum 22375, 24313"
 	default y
@@ -530,9 +608,16 @@ config QCOM_FALKOR_ERRATUM_1003
 	  is unchanged. Work around the erratum by invalidating the walk cache
 	  entries for the trampoline before entering the kernel proper.
 
+config ARM64_WORKAROUND_REPEAT_TLBI
+	bool
+	help
+	  Enable the repeat TLBI workaround for Falkor erratum 1009 and
+	  Cortex-A76 erratum 1286807.
+
 config QCOM_FALKOR_ERRATUM_1009
 	bool "Falkor E1009: Prematurely complete a DSB after a TLBI"
 	default y
+	select ARM64_WORKAROUND_REPEAT_TLBI
 	help
 	  On Falkor v1, the CPU may prematurely complete a DSB following a
 	  TLBI xxIS invalidate maintenance operation. Repeat the TLBI operation
@@ -662,6 +747,25 @@ config HOTPLUG_CPU
 	  Say Y here to experiment with turning CPUs off and on.  CPUs
 	  can be controlled through /sys/devices/system/cpu.
 
+config ARCH_ENABLE_MEMORY_HOTPLUG
+    depends on !NUMA
+	def_bool y
+
+config ARCH_ENABLE_MEMORY_HOTREMOVE
+	def_bool y
+
+# The GPIO number here must be sorted by descending number. In case of
+# a multiplatform kernel, we just want the highest value required by the
+# selected platforms.
+config ARCH_NR_GPIO
+	int
+	default 1280 if ARCH_QCOM
+	default 256
+	help
+	  Maximum number of GPIOs in the system.
+
+	  If unsure, leave the default value.
+
 # Common NUMA Features
 config NUMA
 	bool "Numa Memory Allocation and Scheduler Support"
@@ -735,6 +839,41 @@ config ARCH_HAS_CACHE_LINE_SIZE
 
 source "mm/Kconfig"
 
+config ARM64_DMA_USE_IOMMU
+	bool "ARM64 DMA iommu integration"
+	select ARM_HAS_SG_CHAIN
+	select NEED_SG_DMA_LENGTH
+	help
+	  Enable using iommu through the standard dma apis.
+	  dma_alloc_coherent() will allocate scatter-gather memory
+	  which is made virtually contiguous via iommu.
+	  Enable if system contains IOMMU hardware.
+
+if ARM64_DMA_USE_IOMMU
+
+config ARM64_DMA_IOMMU_ALIGNMENT
+	int "Maximum PAGE_SIZE order of alignment for DMA IOMMU buffers"
+	range 4 9
+	default 9
+	help
+	  DMA mapping framework by default aligns all buffers to the smallest
+	  PAGE_SIZE order which is greater than or equal to the requested buffer
+	  size. This works well for buffers up to a few hundreds kilobytes, but
+	  for larger buffers it just a waste of address space. Drivers which has
+	  relatively small addressing window (like 64Mib) might run out of
+	  virtual space with just a few allocations.
+
+	  With this parameter you can specify the maximum PAGE_SIZE order for
+	  DMA IOMMU buffers. Larger buffers will be aligned only to this
+	  specified order. The order is expressed as a power of two multiplied
+	  by the PAGE_SIZE.
+
+endif
+
+config ARCH_MEMORY_PROBE
+	def_bool y
+	depends on MEMORY_HOTPLUG
+
 config SECCOMP
 	bool "Enable seccomp to safely compute untrusted bytecode"
 	---help---
@@ -800,6 +939,13 @@ config XEN
 	help
 	  Say Y if you want to run Linux in a Virtual Machine on Xen on ARM64.
 
+config OKL4_GUEST
+	bool "OKL4 Hypervisor guest support"
+	depends on ARM64 && OF
+	default n
+	help
+	  Say Y if you want to run Linux as a guest of the OKL4 hypervisor
+
 config FORCE_MAX_ZONEORDER
 	int
 	default "14" if (ARM64_64K_PAGES && TRANSPARENT_HUGEPAGE)
@@ -852,9 +998,17 @@ config HARDEN_BRANCH_PREDICTOR
 
 	  If unsure, say Y.
 
+config PRINT_VMEMLAYOUT
+	bool "Enable debug option to print kernel virtual memory layout"
+	help
+	  Enable support for printing kernel virtual memory layout for debugging
+	  purpose. If disabled kernel would not show any information about
+	  virtual memory layout during boot up.
+
+	  If unsure, say N.
+
 config ARM64_SSBD
 	bool "Speculative Store Bypass Disable" if EXPERT
-	default y
 	help
 	  This enables mitigation of the bypassing of previous stores
 	  by speculative loads.
@@ -1209,6 +1363,45 @@ config BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES
 	  Space separated list of names of dtbs to append when
 	  building a concatenated Image.gz-dtb.
 
+choice
+	prompt "Kernel compression method"
+	default BUILD_ARM64_KERNEL_COMPRESSION_GZIP
+	help
+	  Allows choice between gzip compressed or uncompressed
+	  kernel image
+
+config BUILD_ARM64_KERNEL_COMPRESSION_GZIP
+	bool "Build compressed kernel image"
+	help
+	  Build a kernel image using gzip
+	  compression with concatenated dtb.
+	  gzip is based on the DEFLATE
+	  algorithm.
+
+config BUILD_ARM64_UNCOMPRESSED_KERNEL
+	bool "Build uncompressed kernel image"
+	help
+	  Build a kernel image without
+	  compression and with
+	  concatenated dtb.
+endchoice
+
+config KRYO_PMU_WORKAROUND
+	bool "Workaround for PMU IRQ burst"
+	default n
+	depends on ARM_PMU
+	help
+	  Disable Performance Monitor overflow interrupts
+	  when handling an monitor IRQ, to avoid simultaneous
+	  overflow interrupts from multiple monitors.
+
+	  Enable this flag for effect SoCs.
+
+config BUILD_ARM64_DT_OVERLAY
+	bool "enable DT overlay compilation support"
+	depends on OF
+	help
+	  This option enables support for DT overlay compilation.
 endmenu
 
 menu "Userspace binary formats"

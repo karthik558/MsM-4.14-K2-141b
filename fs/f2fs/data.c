@@ -959,7 +959,6 @@ alloc_new:
 				       GFP_NOIO);
 		__attach_io_flag(fio);
 		bio_set_op_attrs(bio, fio->op, fio->op_flags);
-
 		add_bio_entry(fio->sbi, bio, page, fio->temp);
 	} else {
 		if (add_ipu_page(fio, &bio, page))
@@ -1884,6 +1883,7 @@ static int f2fs_xattr_fiemap(struct inode *inode,
 			return err;
 		}
 
+
 		phys = (__u64)blk_to_logical(inode, ni.blk_addr);
 		offset = offsetof(struct f2fs_inode, i_addr) +
 					sizeof(__le32) * (DEF_ADDRS_PER_INODE -
@@ -2167,6 +2167,7 @@ submit_and_realloc:
 		__f2fs_submit_read_bio(F2FS_I_SB(inode), bio, DATA);
 		bio = NULL;
 	}
+
 	if (bio == NULL) {
 		bio = f2fs_grab_read_bio(inode, block_nr, nr_pages,
 				is_readahead ? REQ_RAHEAD : 0, page->index,
@@ -2177,7 +2178,6 @@ submit_and_realloc:
 			goto out;
 		}
 	}
-
 	/*
 	 * If the page is under writeback, we need to wait for
 	 * its completion to see the correct decrypted data.

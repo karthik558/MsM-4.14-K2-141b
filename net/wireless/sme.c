@@ -51,6 +51,29 @@ struct cfg80211_conn {
 	bool auto_auth, prev_bssid_valid;
 };
 
+static bool cfg80211_is_all_countryie_ignore(void)
+{
+	struct cfg80211_registered_device *rdev;
+	struct wireless_dev *wdev;
+	bool is_all_countryie_ignore = true;
+
+	list_for_each_entry(rdev, &cfg80211_rdev_list, list) {
+		list_for_each_entry(wdev, &rdev->wiphy.wdev_list, list) {
+			wdev_lock(wdev);
+			if (!(wdev->wiphy->regulatory_flags &
+				REGULATORY_COUNTRY_IE_IGNORE)) {
+				is_all_countryie_ignore = false;
+				wdev_unlock(wdev);
+				goto out;
+			}
+			wdev_unlock(wdev);
+		}
+	}
+
+out:
+	return is_all_countryie_ignore;
+}
+
 static void cfg80211_sme_free(struct wireless_dev *wdev)
 {
 	if (!wdev->conn)
@@ -662,7 +685,8 @@ static bool cfg80211_is_all_idle(void)
 static void disconnect_work(struct work_struct *work)
 {
 	rtnl_lock();
-	if (cfg80211_is_all_idle())
+	if (cfg80211_is_all_idle() &&
+	    !cfg80211_is_all_countryie_ignore())
 		regulatory_hint_disconnect();
 	rtnl_unlock();
 }
@@ -1008,9 +1032,15 @@ void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 	 * Delete all the keys ... pairwise keys can't really
 	 * exist any more anyway, but default keys might.
 	 */
-	if (rdev->ops->del_key)
-		for (i = 0; i < 6; i++)
+	if (rdev->ops->del_key) {
+		int max_key_idx = 5;
+
+		if (wiphy_ext_feature_isset(wdev->wiphy,
+			    NL80211_EXT_FEATURE_BEACON_PROTECTION))
+			max_key_idx = 7;
+		for (i = 0; i <= max_key_idx; i++)
 			rdev_del_key(rdev, dev, i, false, NULL);
+	}
 
 	rdev_set_qos_map(rdev, dev, NULL);
 

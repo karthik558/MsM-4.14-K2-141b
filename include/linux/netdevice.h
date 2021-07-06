@@ -56,6 +56,7 @@ struct netpoll_info;
 struct device;
 struct phy_device;
 struct dsa_switch_tree;
+struct macsec_context;
 
 /* 802.11 specific */
 struct wireless_dev;
@@ -824,6 +825,35 @@ struct xfrmdev_ops {
 	void	(*xdo_dev_state_free) (struct xfrm_state *x);
 	bool	(*xdo_dev_offload_ok) (struct sk_buff *skb,
 				       struct xfrm_state *x);
+};
+#endif
+
+#if IS_ENABLED(CONFIG_MACSEC)
+struct macsec_ops {
+	/* Device wide */
+	int (*mdo_dev_open)(struct macsec_context *ctx);
+	int (*mdo_dev_stop)(struct macsec_context *ctx);
+	/* SecY */
+	int (*mdo_add_secy)(struct macsec_context *ctx);
+	int (*mdo_upd_secy)(struct macsec_context *ctx);
+	int (*mdo_del_secy)(struct macsec_context *ctx);
+	/* Security channels */
+	int (*mdo_add_rxsc)(struct macsec_context *ctx);
+	int (*mdo_upd_rxsc)(struct macsec_context *ctx);
+	int (*mdo_del_rxsc)(struct macsec_context *ctx);
+	/* Security associations */
+	int (*mdo_add_rxsa)(struct macsec_context *ctx);
+	int (*mdo_upd_rxsa)(struct macsec_context *ctx);
+	int (*mdo_del_rxsa)(struct macsec_context *ctx);
+	int (*mdo_add_txsa)(struct macsec_context *ctx);
+	int (*mdo_upd_txsa)(struct macsec_context *ctx);
+	int (*mdo_del_txsa)(struct macsec_context *ctx);
+	/* Statistics */
+	int (*mdo_get_dev_stats)(struct macsec_context *ctx);
+	int (*mdo_get_tx_sc_stats)(struct macsec_context *ctx);
+	int (*mdo_get_tx_sa_stats)(struct macsec_context *ctx);
+	int (*mdo_get_rx_sc_stats)(struct macsec_context *ctx);
+	int (*mdo_get_rx_sa_stats)(struct macsec_context *ctx);
 };
 #endif
 
@@ -1629,6 +1659,8 @@ enum netdev_priv_flags {
  *			switch driver and used to set the phys state of the
  *			switch port.
  *
+ *	@macsec_ops:    MACsec offloading ops
+ *
  *	FIXME: cleanup struct net_device such that network protocol info
  *	moves out.
  */
@@ -1907,6 +1939,11 @@ struct net_device {
 	struct lock_class_key	*qdisc_tx_busylock;
 	struct lock_class_key	*qdisc_running_key;
 	bool			proto_down;
+
+#if IS_ENABLED(CONFIG_MACSEC)
+	/* MACsec management functions */
+	const struct macsec_ops *macsec_ops;
+#endif
 };
 #define to_net_dev(d) container_of(d, struct net_device, dev)
 
@@ -2146,13 +2183,10 @@ struct napi_gro_cb {
 	/* Used in GRE, set in fou/gue_gro_receive */
 	u8	is_fou:1;
 
-	/* Used to determine if flush_id can be ignored */
-	u8	is_atomic:1;
-
 	/* Number of gro_receive callbacks this packet already went through */
 	u8 recursion_counter:4;
 
-	/* 1 bit hole */
+	/* 2 bit hole */
 
 	/* used to support CHECKSUM_COMPLETE for tunneling protocols */
 	__wsum	csum;
@@ -2786,12 +2820,15 @@ extern int netdev_flow_limit_table_len;
  */
 struct softnet_data {
 	struct list_head	poll_list;
+	struct napi_struct	*current_napi;
 	struct sk_buff_head	process_queue;
 
 	/* stats */
 	unsigned int		processed;
 	unsigned int		time_squeeze;
 	unsigned int		received_rps;
+	unsigned int            gro_coalesced;
+
 #ifdef CONFIG_RPS
 	struct softnet_data	*rps_ipi_list;
 #endif
@@ -3297,6 +3334,7 @@ struct sk_buff *napi_get_frags(struct napi_struct *napi);
 gro_result_t napi_gro_frags(struct napi_struct *napi);
 struct packet_offload *gro_find_receive_by_type(__be16 type);
 struct packet_offload *gro_find_complete_by_type(__be16 type);
+extern struct napi_struct *get_current_napi_context(void);
 
 static inline void napi_free_frags(struct napi_struct *napi)
 {
@@ -4150,6 +4188,7 @@ static inline bool net_gso_ok(netdev_features_t features, int gso_type)
 	BUILD_BUG_ON(SKB_GSO_SCTP    != (NETIF_F_GSO_SCTP >> NETIF_F_GSO_SHIFT));
 	BUILD_BUG_ON(SKB_GSO_ESP != (NETIF_F_GSO_ESP >> NETIF_F_GSO_SHIFT));
 	BUILD_BUG_ON(SKB_GSO_UDP != (NETIF_F_GSO_UDP >> NETIF_F_GSO_SHIFT));
+	BUILD_BUG_ON(SKB_GSO_UDP_L4 != (NETIF_F_GSO_UDP_L4 >> NETIF_F_GSO_SHIFT));
 
 	return (features & feature) == feature;
 }

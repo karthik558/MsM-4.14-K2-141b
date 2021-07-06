@@ -253,8 +253,9 @@ int scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
 	int ret = DRIVER_ERROR << 24;
 
 	req = blk_get_request(sdev->request_queue,
-			data_direction == DMA_TO_DEVICE ?
-			REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN, __GFP_RECLAIM);
+			      (data_direction == DMA_TO_DEVICE ?
+			       REQ_OP_SCSI_OUT : REQ_OP_SCSI_IN) | REQ_PREEMPT,
+			      __GFP_RECLAIM);
 	if (IS_ERR(req))
 		return ret;
 	rq = scsi_req(req);
@@ -266,9 +267,13 @@ int scsi_execute(struct scsi_device *sdev, const unsigned char *cmd,
 	rq->cmd_len = COMMAND_SIZE(cmd[0]);
 	memcpy(rq->cmd, cmd, rq->cmd_len);
 	rq->retries = retries;
-	req->timeout = timeout;
+	if (likely(!sdev->timeout_override))
+		req->timeout = timeout;
+	else
+		req->timeout = sdev->timeout_override;
+
 	req->cmd_flags |= flags;
-	req->rq_flags |= rq_flags | RQF_QUIET | RQF_PREEMPT;
+	req->rq_flags |= rq_flags | RQF_QUIET;
 
 	/*
 	 * head injection *required* here otherwise quiesce won't work
@@ -1340,7 +1345,7 @@ scsi_prep_state_check(struct scsi_device *sdev, struct request *req)
 			/*
 			 * If the devices is blocked we defer normal commands.
 			 */
-			if (!(req->rq_flags & RQF_PREEMPT))
+			if (!(req->cmd_flags & REQ_PREEMPT))
 				ret = BLKPREP_DEFER;
 			break;
 		default:
@@ -1349,7 +1354,7 @@ scsi_prep_state_check(struct scsi_device *sdev, struct request *req)
 			 * special commands.  In particular any user initiated
 			 * command is not allowed.
 			 */
-			if (!(req->rq_flags & RQF_PREEMPT))
+			if (!(req->cmd_flags & REQ_PREEMPT))
 				ret = BLKPREP_KILL;
 			break;
 		}
@@ -2374,6 +2379,33 @@ void scsi_unblock_requests(struct Scsi_Host *shost)
 }
 EXPORT_SYMBOL(scsi_unblock_requests);
 
+/*
+ * Function:    scsi_set_cmd_timeout_override()
+ *
+ * Purpose:     Utility function used by low-level drivers to override
+		timeout for the scsi commands.
+ *
+ * Arguments:   sdev       - scsi device in question
+ *		timeout	   - timeout in jiffies
+ *
+ * Returns:     Nothing
+ *
+ * Lock status: No locks are assumed held.
+ *
+ * Notes:	Some platforms might be very slow and command completion may
+ *		take much longer than default scsi command timeouts.
+ *		SCSI Read/Write command timeout can be changed by
+ *		blk_queue_rq_timeout() but there is no option to override
+ *		timeout for rest of the scsi commands. This function would
+ *		would allow this.
+ */
+void scsi_set_cmd_timeout_override(struct scsi_device *sdev,
+				   unsigned int timeout)
+{
+	sdev->timeout_override = timeout;
+}
+EXPORT_SYMBOL(scsi_set_cmd_timeout_override);
+
 int __init scsi_init_queue(void)
 {
 	scsi_sdb_cache = kmem_cache_create("scsi_data_buffer",
@@ -2967,12 +2999,28 @@ scsi_device_quiesce(struct scsi_device *sdev)
 {
 	int err;
 
+	/*
+	 * Simply quiesing SCSI device isn't safe, it is easy
+	 * to use up requests because all these allocated requests
+	 * can't be dispatched when device is put in QIUESCE.
+	 * Then no request can be allocated and we may hang
+	 * somewhere, such as system suspend/resume.
+	 *
+	 * So we set block queue in preempt only first, no new
+	 * normal request can enter queue any more, and all pending
+	 * requests are drained once blk_set_preempt_only()
+	 * returns. Only RQF_PREEMPT is allowed in preempt only mode.
+	 */
+	blk_set_preempt_only(sdev->request_queue, true);
+
 	mutex_lock(&sdev->state_mutex);
 	err = scsi_device_set_state(sdev, SDEV_QUIESCE);
 	mutex_unlock(&sdev->state_mutex);
 
-	if (err)
+	if (err) {
+		blk_set_preempt_only(sdev->request_queue, false);
 		return err;
+	}
 
 	scsi_run_queue(sdev->request_queue);
 	while (atomic_read(&sdev->device_busy)) {
@@ -3003,6 +3051,8 @@ void scsi_device_resume(struct scsi_device *sdev)
 	    scsi_device_set_state(sdev, SDEV_RUNNING) == 0)
 		scsi_run_queue(sdev->request_queue);
 	mutex_unlock(&sdev->state_mutex);
+
+	blk_set_preempt_only(sdev->request_queue, false);
 }
 EXPORT_SYMBOL(scsi_device_resume);
 

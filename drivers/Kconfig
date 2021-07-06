@@ -61,6 +61,8 @@ source "drivers/spi/Kconfig"
 
 source "drivers/spmi/Kconfig"
 
+source "drivers/slimbus/Kconfig"
+
 source "drivers/hsi/Kconfig"
 
 source "drivers/pps/Kconfig"
@@ -70,6 +72,8 @@ source "drivers/ptp/Kconfig"
 source "drivers/pinctrl/Kconfig"
 
 source "drivers/gpio/Kconfig"
+
+source "drivers/gnsssirf/Kconfig"
 
 source "drivers/w1/Kconfig"
 
@@ -137,6 +141,8 @@ source "drivers/hv/Kconfig"
 
 source "drivers/xen/Kconfig"
 
+source "drivers/vservices/Kconfig"
+
 source "drivers/staging/Kconfig"
 
 source "drivers/platform/Kconfig"
@@ -170,6 +176,8 @@ source "drivers/ntb/Kconfig"
 source "drivers/vme/Kconfig"
 
 source "drivers/pwm/Kconfig"
+
+source "drivers/gpu/msm/Kconfig"
 
 source "drivers/irqchip/Kconfig"
 
@@ -212,5 +220,9 @@ source "drivers/fsi/Kconfig"
 source "drivers/tee/Kconfig"
 
 source "drivers/mux/Kconfig"
+
+source "drivers/sensors/Kconfig"
+
+source "drivers/esoc/Kconfig"
 
 endmenu

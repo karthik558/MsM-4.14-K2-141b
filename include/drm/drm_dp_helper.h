@@ -64,6 +64,11 @@
 /* AUX CH addresses */
 /* DPCD */
 #define DP_DPCD_REV                         0x000
+# define DP_DPCD_REV_10                     0x10
+# define DP_DPCD_REV_11                     0x11
+# define DP_DPCD_REV_12                     0x12
+# define DP_DPCD_REV_13                     0x13
+# define DP_DPCD_REV_14                     0x14
 
 #define DP_MAX_LINK_RATE                    0x001
 
@@ -75,6 +80,7 @@
 #define DP_MAX_DOWNSPREAD                   0x003
 # define DP_MAX_DOWNSPREAD_0_5		    (1 << 0)
 # define DP_NO_AUX_HANDSHAKE_LINK_TRAINING  (1 << 6)
+# define DP_TPS4_SUPPORTED                  (1 << 7)
 
 #define DP_NORP                             0x004
 
@@ -118,6 +124,7 @@
 # define DP_DPCD_DISPLAY_CONTROL_CAPABLE     (1 << 3) /* edp v1.2 or higher */
 
 #define DP_TRAINING_AUX_RD_INTERVAL         0x00e   /* XXX 1.2? */
+# define DP_TRAINING_AUX_RD_MASK            0x7F    /* XXX 1.2? */
 
 #define DP_ADAPTER_CAP			    0x00f   /* 1.2 */
 # define DP_FORCE_LOAD_SENSE_CAP	    (1 << 0)
@@ -328,12 +335,20 @@
 # define DP_DS_12BPC		            2
 # define DP_DS_16BPC		            3
 
+/* DP Forward error Correction Registers */
+#define DP_FEC_CAPABILITY		    0x090    /* 1.4 */
+# define DP_FEC_CAPABLE			    (1 << 0)
+# define DP_FEC_UNCORR_BLK_ERROR_COUNT_CAP  (1 << 1)
+# define DP_FEC_CORR_BLK_ERROR_COUNT_CAP    (1 << 2)
+# define DP_FEC_BIT_ERROR_COUNT_CAP	    (1 << 3)
+
 /* link configuration */
 #define	DP_LINK_BW_SET		            0x100
 # define DP_LINK_RATE_TABLE		    0x00    /* eDP 1.4 */
 # define DP_LINK_BW_1_62		    0x06
 # define DP_LINK_BW_2_7			    0x0a
 # define DP_LINK_BW_5_4			    0x14    /* 1.2 */
+# define DP_LINK_BW_8_1			    0x1e    /* 1.4 */
 
 #define DP_LANE_COUNT_SET	            0x101
 # define DP_LANE_COUNT_MASK		    0x0f
@@ -344,7 +359,9 @@
 # define DP_TRAINING_PATTERN_1		    1
 # define DP_TRAINING_PATTERN_2		    2
 # define DP_TRAINING_PATTERN_3		    3	    /* 1.2 */
+# define DP_TRAINING_PATTERN_4              7       /* 1.4 */
 # define DP_TRAINING_PATTERN_MASK	    0x3
+# define DP_TRAINING_PATTERN_MASK_1_4	    0xf
 
 /* DPCD 1.1 only. For DPCD >= 1.2 see per-lane DP_LINK_QUAL_LANEn_SET */
 # define DP_LINK_QUAL_PATTERN_11_DISABLE    (0 << 2)
@@ -441,6 +458,19 @@
 #define DP_UPSTREAM_DEVICE_DP_PWR_NEED	    0x118   /* 1.2 */
 # define DP_PWR_NOT_NEEDED		    (1 << 0)
 
+#define DP_FEC_CONFIGURATION		    0x120    /* 1.4 */
+# define DP_FEC_READY			    (1 << 0)
+# define DP_FEC_ERR_COUNT_SEL_MASK	    (7 << 1)
+# define DP_FEC_ERR_COUNT_DIS		    (0 << 1)
+# define DP_FEC_UNCORR_BLK_ERROR_COUNT	    (1 << 1)
+# define DP_FEC_CORR_BLK_ERROR_COUNT	    (2 << 1)
+# define DP_FEC_BIT_ERROR_COUNT		    (3 << 1)
+# define DP_FEC_LANE_SELECT_MASK	    (3 << 4)
+# define DP_FEC_LANE_0_SELECT		    (0 << 4)
+# define DP_FEC_LANE_1_SELECT		    (1 << 4)
+# define DP_FEC_LANE_2_SELECT		    (2 << 4)
+# define DP_FEC_LANE_3_SELECT		    (3 << 4)
+
 #define DP_AUX_FRAME_SYNC_VALUE		    0x15c   /* eDP 1.4 */
 # define DP_AUX_FRAME_SYNC_VALID	    (1 << 0)
 
@@ -517,6 +547,8 @@
 # define DP_TEST_LINK_EDID_READ		    (1 << 2)
 # define DP_TEST_LINK_PHY_TEST_PATTERN	    (1 << 3) /* DPCD >= 1.1 */
 # define DP_TEST_LINK_FAUX_PATTERN	    (1 << 4) /* DPCD >= 1.2 */
+# define DP_TEST_LINK_AUDIO_PATTERN     (1 << 5)
+# define DP_TEST_LINK_AUDIO_DISABLED_VIDEO (1 << 6)
 
 #define DP_TEST_LINK_RATE		    0x219
 # define DP_LINK_RATE_162		    (0x6)
@@ -591,6 +623,16 @@
 # define DP_TEST_CRC_SUPPORTED		    (1 << 5)
 # define DP_TEST_COUNT_MASK		    0xf
 
+#define DP_TEST_PHY_PATTERN		    0x248
+# define DP_TEST_PHY_PATTERN_NONE			0x0
+# define DP_TEST_PHY_PATTERN_D10_2_NO_SCRAMBLING	0x1
+# define DP_TEST_PHY_PATTERN_SYMBOL_ERR_MEASUREMENT_CNT 0x2
+# define DP_TEST_PHY_PATTERN_PRBS7			0x3
+# define DP_TEST_PHY_PATTERN_80_BIT_CUSTOM_PATTERN	0x4
+# define DP_TEST_PHY_PATTERN_CP2520_PATTERN_1		0x5
+# define DP_TEST_PHY_PATTERN_CP2520_PATTERN_2		0x6
+# define DP_TEST_PHY_PATTERN_CP2520_PATTERN_3		0x7
+
 #define DP_TEST_RESPONSE		    0x260
 # define DP_TEST_ACK			    (1 << 0)
 # define DP_TEST_NAK			    (1 << 1)
@@ -600,6 +642,29 @@
 
 #define DP_TEST_SINK			    0x270
 # define DP_TEST_SINK_START		    (1 << 0)
+
+#define DP_TEST_AUDIO_MODE		    0x271
+
+#define DP_TEST_AUDIO_PATTERN_TYPE	    0x272
+
+#define DP_TEST_AUDIO_PERIOD_CH1	    0x273
+#define DP_TEST_AUDIO_PERIOD_CH2	    0x274
+#define DP_TEST_AUDIO_PERIOD_CH3	    0x275
+#define DP_TEST_AUDIO_PERIOD_CH4	    0x276
+#define DP_TEST_AUDIO_PERIOD_CH5	    0x277
+#define DP_TEST_AUDIO_PERIOD_CH6	    0x278
+#define DP_TEST_AUDIO_PERIOD_CH7	    0x279
+#define DP_TEST_AUDIO_PERIOD_CH8	    0x27A
+
+#define DP_FEC_STATUS			    0x280    /* 1.4 */
+# define DP_FEC_DECODE_EN_DETECTED	    (1 << 0)
+# define DP_FEC_DECODE_DIS_DETECTED	    (1 << 1)
+
+#define DP_FEC_ERROR_COUNT_LSB		    0x0281    /* 1.4 */
+
+#define DP_FEC_ERROR_COUNT_MSB		    0x0282    /* 1.4 */
+# define DP_FEC_ERROR_COUNT_MASK	    0x7F
+# define DP_FEC_ERR_COUNT_VALID		    (1 << 7)
 
 #define DP_PAYLOAD_TABLE_UPDATE_STATUS      0x2c0   /* 1.2 MST */
 # define DP_PAYLOAD_TABLE_UPDATED           (1 << 0)
@@ -925,6 +990,20 @@ drm_dp_tps3_supported(const u8 dpcd[DP_RECEIVER_CAP_SIZE])
 {
 	return dpcd[DP_DPCD_REV] >= 0x12 &&
 		dpcd[DP_MAX_LANE_COUNT] & DP_TPS3_SUPPORTED;
+}
+
+static inline bool
+drm_dp_tps4_supported(const u8 dpcd[DP_RECEIVER_CAP_SIZE])
+{
+	return dpcd[DP_DPCD_REV] >= 0x14 &&
+		dpcd[DP_MAX_DOWNSPREAD] & DP_TPS4_SUPPORTED;
+}
+
+static inline u8
+drm_dp_training_pattern_mask(const u8 dpcd[DP_RECEIVER_CAP_SIZE])
+{
+	return (dpcd[DP_DPCD_REV] >= 0x14) ? DP_TRAINING_PATTERN_MASK_1_4 :
+		DP_TRAINING_PATTERN_MASK;
 }
 
 static inline bool

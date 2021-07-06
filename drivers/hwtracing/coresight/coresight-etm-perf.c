@@ -145,6 +145,9 @@ static void free_sink_buffer(struct etm_event_data *event_data)
 
 	cpu = cpumask_first(mask);
 	sink = coresight_get_sink(etm_event_cpu_path(event_data, cpu));
+	if (!sink)
+		return;
+
 	sink_ops(sink)->free_buffer(event_data->snk_config);
 }
 
@@ -153,6 +156,7 @@ static void free_event_data(struct work_struct *work)
 	int cpu;
 	cpumask_t *mask;
 	struct etm_event_data *event_data;
+	struct coresight_device *source;
 
 	event_data = container_of(work, struct etm_event_data, work);
 	mask = &event_data->mask;
@@ -164,8 +168,9 @@ static void free_event_data(struct work_struct *work)
 		struct list_head **ppath;
 
 		ppath = etm_event_cpu_path_ptr(event_data, cpu);
+		source = coresight_get_source(event_data->path[cpu]);
 		if (!(IS_ERR_OR_NULL(*ppath)))
-			coresight_release_path(*ppath);
+			coresight_release_path(source, *ppath);
 		*ppath = NULL;
 	}
 

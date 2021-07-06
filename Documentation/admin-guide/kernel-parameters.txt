@@ -430,6 +430,10 @@
 			embedded devices based on command line input.
 			See Documentation/block/cmdline-partition.txt
 
+	boot_cpus=	[SMP]
+			Rather than attempting to online all possible CPUs at
+			boot time, only online the specified set of CPUs.
+
 	boot_delay=	Milliseconds to delay each printk during boot.
 			Values larger than 10 seconds (10000) are changed to
 			no delay (0).
@@ -841,6 +845,11 @@
 
 	dis_ucode_ldr	[X86] Disable the microcode loader.
 
+	dm=		[DM] Allows early creation of a device-mapper device.
+			See Documentation/device-mapper/boot.txt.
+
+	dmasound=	[HW,OSS] Sound subsystem buff
+
 	dma_debug=off	If the kernel is compiled with DMA_API_DEBUG support,
 			this option disables the debugging code at boot.
 
@@ -857,6 +866,10 @@
 			pass the driver to filter for as the parameter.
 			The filter can be disabled or changed to another
 			driver later using sysfs.
+
+	driver_async_probe=  [KNL]
+			List of driver names to be probed asynchronously.
+			Format: <driver_name1>,<driver_name2>...
 
 	drm_kms_helper.edid_firmware=[<connector>:]<file>[,[<connector>:]<file>]
 			Broken monitors, graphic adapters, KVMs and EDIDless
@@ -3924,6 +3937,17 @@
 				(that will set all pages holding image data
 				during restoration read-only).
 
+	noswap_randomize
+			Kernel uses random disk offsets to help with wear-levelling
+			of SSD devices, while saving the hibernation snapshot image to
+			disk. Use this parameter to disable this feature for SSD
+			devices in scenarios when, such randomization is addressed at
+			the firmware level and hibenration image is not re-generated
+			frequently.
+			(Useful for improving hibernation resume time as snapshot pages
+			are available in disk serially and can be read in bigger chunks
+			without seeking)
+
 	retain_initrd	[RAM] Keep initrd memory after extraction
 
 	rfkill.default_state=
@@ -5054,3 +5078,9 @@
 	xirc2ps_cs=	[NET,PCMCIA]
 			Format:
 			<irq>,<irq_mask>,<io>,<full_duplex>,<do_sound>,<lockup_hack>[,<irq2>[,<irq3>[,<irq4>]]]
+
+	eipv4=	[KNL] Sets ipv4 address at boot up for early ethernet.
+
+	eipv6=	[KNL] Sets ipv6 address at boot up for early ethernet.
+
+	ermac=	[KNL] Sets mac address at boot up for early ethernet.

@@ -298,7 +298,6 @@ struct inet_frag_queue *inet_frag_find(struct netns_frags *nf, void *key)
 			fq = NULL;
 	}
 	rcu_read_unlock();
-
 	return fq;
 }
 EXPORT_SYMBOL(inet_frag_find);

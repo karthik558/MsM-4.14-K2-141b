@@ -69,6 +69,7 @@ int dm_linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	kfree(lc);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(dm_linear_ctr);
 
 void dm_linear_dtr(struct dm_target *ti)
 {
@@ -77,6 +78,7 @@ void dm_linear_dtr(struct dm_target *ti)
 	dm_put_device(ti, lc->dev);
 	kfree(lc);
 }
+EXPORT_SYMBOL_GPL(dm_linear_dtr);
 
 static sector_t linear_map_sector(struct dm_target *ti, sector_t bi_sector)
 {
@@ -101,6 +103,7 @@ int dm_linear_map(struct dm_target *ti, struct bio *bio)
 
 	return DM_MAPIO_REMAPPED;
 }
+EXPORT_SYMBOL_GPL(dm_linear_map);
 
 int dm_linear_end_io(struct dm_target *ti, struct bio *bio,
 			 blk_status_t *error)
@@ -130,6 +133,7 @@ void dm_linear_status(struct dm_target *ti, status_type_t type,
 		break;
 	}
 }
+EXPORT_SYMBOL_GPL(dm_linear_status);
 
 int dm_linear_prepare_ioctl(struct dm_target *ti,
 		struct block_device **bdev, fmode_t *mode)
@@ -147,6 +151,7 @@ int dm_linear_prepare_ioctl(struct dm_target *ti,
 		return 1;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(dm_linear_prepare_ioctl);
 
 int dm_linear_iterate_devices(struct dm_target *ti,
 				  iterate_devices_callout_fn fn, void *data)
@@ -155,6 +160,7 @@ int dm_linear_iterate_devices(struct dm_target *ti,
 
 	return fn(ti, lc->dev, lc->start, ti->len, data);
 }
+EXPORT_SYMBOL_GPL(dm_linear_iterate_devices);
 
 long dm_linear_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 		long nr_pages, void **kaddr, pfn_t *pfn)

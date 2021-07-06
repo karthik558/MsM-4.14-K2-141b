@@ -353,6 +353,7 @@ static const struct __ftr_reg_entry {
 	/* Op1 = 0, CRn = 0, CRm = 4 */
 	ARM64_FTR_REG(SYS_ID_AA64PFR0_EL1, ftr_id_aa64pfr0),
 	ARM64_FTR_REG(SYS_ID_AA64PFR1_EL1, ftr_id_aa64pfr1),
+	ARM64_FTR_REG(SYS_ID_AA64ZFR0_EL1, ftr_raz),
 
 	/* Op1 = 0, CRn = 0, CRm = 5 */
 	ARM64_FTR_REG(SYS_ID_AA64DFR0_EL1, ftr_id_aa64dfr0),
@@ -563,7 +564,7 @@ static int check_update_ftr_reg(u32 sys_id, int cpu, u64 val, u64 boot)
 	update_cpu_ftr_reg(regp, val);
 	if ((boot & regp->strict_mask) == (val & regp->strict_mask))
 		return 0;
-	pr_warn("SANITY CHECK: Unexpected variation in %s. Boot CPU: %#016llx, CPU%d: %#016llx\n",
+	pr_debug("SANITY CHECK: Unexpected variation in %s. Boot CPU: %#016llx, CPU%d: %#016llx\n",
 			regp->name, boot, cpu, val);
 	return 1;
 }
@@ -931,6 +932,79 @@ static int __init parse_kpti(char *str)
 }
 early_param("kpti", parse_kpti);
 
+#ifdef CONFIG_ARM64_HW_AFDBM
+static inline void __cpu_enable_hw_dbm(void)
+{
+	u64 tcr = read_sysreg(tcr_el1) | TCR_HD;
+
+	write_sysreg(tcr, tcr_el1);
+	isb();
+}
+
+static bool cpu_has_broken_dbm(void)
+{
+	/* List of CPUs which have broken DBM support. */
+	static const struct midr_range cpus[] = {
+#ifdef CONFIG_ARM64_ERRATUM_1024718
+		// A55 r0p0 -r1p0
+		MIDR_RANGE(MIDR_CORTEX_A55, 0, 0, 1, 0),
+		MIDR_RANGE(MIDR_KRYO3S, 7, 12, 7, 12),
+		MIDR_RANGE(MIDR_KRYO4S, 7, 12, 7, 12),
+#endif
+		{},
+	};
+
+	return is_midr_in_range_list(read_cpuid_id(), cpus);
+}
+
+static bool cpu_can_use_dbm(const struct arm64_cpu_capabilities *cap)
+{
+	bool has_cpu_feature;
+
+	preempt_disable();
+	has_cpu_feature = has_cpuid_feature(cap, SCOPE_LOCAL_CPU);
+	preempt_enable();
+
+	return has_cpu_feature && !cpu_has_broken_dbm();
+}
+
+static void cpu_enable_hw_dbm(struct arm64_cpu_capabilities const *cap)
+{
+	if (cpu_can_use_dbm(cap))
+		__cpu_enable_hw_dbm();
+}
+
+static bool has_hw_dbm(const struct arm64_cpu_capabilities *cap,
+		       int __unused)
+{
+	static bool detected = false;
+	/*
+	 * DBM is a non-conflicting feature. i.e, the kernel can safely
+	 * run a mix of CPUs with and without the feature. So, we
+	 * unconditionally enable the capability to allow any late CPU
+	 * to use the feature. We only enable the control bits on the
+	 * CPU, if it actually supports.
+	 *
+	 * We have to make sure we print the "feature" detection only
+	 * when at least one CPU actually uses it. So check if this CPU
+	 * can actually use it and print the message exactly once.
+	 *
+	 * This is safe as all CPUs (including secondary CPUs - due to the
+	 * LOCAL_CPU scope - and the hotplugged CPUs - via verification)
+	 * goes through the "matches" check exactly once. Also if a CPU
+	 * matches the criteria, it is guaranteed that the CPU will turn
+	 * the DBM on, as the capability is unconditionally enabled.
+	 */
+	if (!detected && cpu_can_use_dbm(cap)) {
+		detected = true;
+		pr_info("detected: Hardware dirty bit management\n");
+	}
+
+	return true;
+}
+
+#endif
+
 #ifdef CONFIG_ARM64_VHE
 static bool runs_at_el2(const struct arm64_cpu_capabilities *entry, int __unused)
 {
@@ -1114,6 +1188,26 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.sys_reg = SYS_ID_AA64ISAR1_EL1,
 		.field_pos = ID_AA64ISAR1_DPB_SHIFT,
 		.min_field_value = 1,
+	},
+#endif
+#ifdef CONFIG_ARM64_HW_AFDBM
+	{
+		/*
+		 * Since we turn this on always, we don't want the user to
+		 * think that the feature is available when it may not be.
+		 * So hide the description.
+		 *
+		 * .desc = "Hardware pagetable Dirty Bit Management",
+		 *
+		 */
+		.capability = ARM64_HW_DBM,
+		.type = ARM64_CPUCAP_WEAK_LOCAL_CPU_FEATURE,
+		.sys_reg = SYS_ID_AA64MMFR1_EL1,
+		.sign = FTR_UNSIGNED,
+		.field_pos = ID_AA64MMFR1_HADBS_SHIFT,
+		.min_field_value = 2,
+		.matches = has_hw_dbm,
+		.cpu_enable = cpu_enable_hw_dbm,
 	},
 #endif
 #ifdef CONFIG_ARM64_SSBD

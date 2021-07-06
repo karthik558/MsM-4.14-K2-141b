@@ -22,6 +22,8 @@
 #ifndef	__LINUX_USB_USBNET_H
 #define	__LINUX_USB_USBNET_H
 
+#define IPC_LOG_NUM_PAGES 30
+
 /* interface from usbnet core to each USB networking link we handle */
 struct usbnet {
 	/* housekeeping */
@@ -84,6 +86,8 @@ struct usbnet {
 #		define EVENT_NO_IP_ALIGN	13
 	u32			rx_speed;	/* in bps - NOT Mbps */
 	u32			tx_speed;	/* in bps - NOT Mbps */
+	void			*ipc_log_ctxt;
+	int			netdev_id;
 };
 
 static inline struct usb_driver *driver_of(struct usb_interface *intf)

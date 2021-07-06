@@ -325,7 +325,7 @@ static void xhci_handle_stopped_cmd_ring(struct xhci_hcd *xhci,
 
 		i_cmd->status = COMP_COMMAND_RING_STOPPED;
 
-		xhci_dbg(xhci, "Turn aborted command %p to no-op\n",
+		xhci_dbg(xhci, "Turn aborted command %pK to no-op\n",
 			 i_cmd->command_trb);
 
 		trb_to_noop(i_cmd->command_trb, TRB_CMD_NOOP);
@@ -362,13 +362,13 @@ static int xhci_abort_cmd_ring(struct xhci_hcd *xhci, unsigned long flags)
 			&xhci->op_regs->cmd_ring);
 
 	/* Section 4.6.1.2 of xHCI 1.0 spec says software should also time the
-	 * completion of the Command Abort operation. If CRR is not negated in 5
-	 * seconds then driver handles it as if host died (-ENODEV).
+	 * completion of the Command Abort operation. If CRR is not negated in a
+	 * timely manner then driver handles it as if host died (-ENODEV).
 	 * In the future we should distinguish between -ENODEV and -ETIMEDOUT
 	 * and try to recover a -ETIMEDOUT with a host controller reset.
 	 */
-	ret = xhci_handshake(&xhci->op_regs->cmd_ring,
-			CMD_RING_RUNNING, 0, 5 * 1000 * 1000);
+	ret = xhci_handshake_check_state(xhci, &xhci->op_regs->cmd_ring,
+			CMD_RING_RUNNING, 0, 1000 * 1000);
 	if (ret < 0) {
 		xhci_err(xhci, "Abort failed to stop command ring: %d\n", ret);
 		xhci_halt(xhci);
@@ -595,7 +595,7 @@ void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
 			"Cycle state = 0x%x", state->new_cycle_state);
 
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
-			"New dequeue segment = %p (virtual)",
+			"New dequeue segment = %pK (virtual)",
 			state->new_deq_seg);
 	addr = xhci_trb_virt_to_dma(state->new_deq_seg, state->new_deq_ptr);
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
@@ -766,7 +766,7 @@ static void xhci_handle_cmd_stop_ep(struct xhci_hcd *xhci, int slot_id,
 			 * short, don't muck with the stream ID after
 			 * submission.
 			 */
-			xhci_warn(xhci, "WARN Cancelled URB %p "
+			xhci_warn(xhci, "WARN Cancelled URB %pK "
 					"has invalid stream ID %u.\n",
 					cur_td->urb,
 					cur_td->urb->stream_id);
@@ -1126,7 +1126,7 @@ static void xhci_handle_cmd_set_deq(struct xhci_hcd *xhci, int slot_id,
 				ep_ring, ep_index);
 		} else {
 			xhci_warn(xhci, "Mismatch between completed Set TR Deq Ptr command & xHCI internal state.\n");
-			xhci_warn(xhci, "ep deq seg = %p, deq ptr = %p\n",
+			xhci_warn(xhci, "ep deq seg = %pK, deq ptr = %pK\n",
 				  ep->queued_deq_seg, ep->queued_deq_ptr);
 		}
 	}
@@ -3564,6 +3564,150 @@ int xhci_queue_ctrl_tx(struct xhci_hcd *xhci, gfp_t mem_flags,
 }
 
 /*
+ * Variant of xhci_queue_ctrl_tx() used to implement EHSET
+ * SINGLE_STEP_SET_FEATURE test mode. It differs in that the control
+ * transfer is broken up so that the SETUP stage can happen and call
+ * the URB's completion handler before the DATA/STATUS stages are
+ * executed by the xHC hardware. This assumes the control transfer is a
+ * GetDescriptor, with a DATA stage in the IN direction, and an OUT
+ * STATUS stage.
+ *
+ * This function is called twice, usually with a 15-second delay in between.
+ * - with is_setup==true, the SETUP stage for the control request
+ *   (GetDescriptor) is queued in the TRB ring and sent to HW immediately
+ * - with is_setup==false, the DATA and STATUS TRBs are queued and exceuted
+ *
+ * Caller must have locked xhci->lock
+ */
+int xhci_submit_single_step_set_feature(struct usb_hcd *hcd, struct urb *urb,
+					int is_setup)
+{
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct xhci_ring *ep_ring;
+	int num_trbs;
+	int ret;
+	unsigned int slot_id, ep_index;
+	struct usb_ctrlrequest *setup;
+	struct xhci_generic_trb *start_trb;
+	int start_cycle;
+	u32 field, length_field, remainder;
+	struct urb_priv *urb_priv;
+	struct xhci_td *td;
+
+	ep_ring = xhci_urb_to_transfer_ring(xhci, urb);
+	if (!ep_ring)
+		return -EINVAL;
+
+	/* Need buffer for data stage */
+	if (urb->transfer_buffer_length <= 0)
+		return -EINVAL;
+
+	/*
+	 * Need to copy setup packet into setup TRB, so we can't use the setup
+	 * DMA address.
+	 */
+	if (!urb->setup_packet)
+		return -EINVAL;
+	setup = (struct usb_ctrlrequest *) urb->setup_packet;
+
+	slot_id = urb->dev->slot_id;
+	ep_index = xhci_get_endpoint_index(&urb->ep->desc);
+
+	urb_priv = kzalloc(sizeof(struct urb_priv) +
+				  sizeof(struct xhci_td *), GFP_ATOMIC);
+	if (!urb_priv)
+		return -ENOMEM;
+
+	td = &urb_priv->td[0];
+	urb_priv->num_tds = 1;
+	urb_priv->num_tds_done = 0;
+	urb->hcpriv = urb_priv;
+
+	num_trbs = is_setup ? 1 : 2;
+
+	ret = prepare_transfer(xhci, xhci->devs[slot_id],
+			ep_index, urb->stream_id,
+			num_trbs, urb, 0, GFP_ATOMIC);
+	if (ret < 0) {
+		kfree(urb_priv);
+		return ret;
+	}
+
+	/*
+	 * Don't give the first TRB to the hardware (by toggling the cycle bit)
+	 * until we've finished creating all the other TRBs.  The ring's cycle
+	 * state may change as we enqueue the other TRBs, so save it too.
+	 */
+	start_trb = &ep_ring->enqueue->generic;
+	start_cycle = ep_ring->cycle_state;
+
+	if (is_setup) {
+		/* Queue only the setup TRB */
+		field = TRB_IDT | TRB_IOC | TRB_TYPE(TRB_SETUP);
+		if (start_cycle == 0)
+			field |= 0x1;
+
+		/* xHCI 1.0/1.1 6.4.1.2.1: Transfer Type field */
+		if (xhci->hci_version >= 0x100) {
+			if (setup->bRequestType & USB_DIR_IN)
+				field |= TRB_TX_TYPE(TRB_DATA_IN);
+			else
+				field |= TRB_TX_TYPE(TRB_DATA_OUT);
+		}
+
+		/* Save the DMA address of the last TRB in the TD */
+		td->last_trb = ep_ring->enqueue;
+
+		queue_trb(xhci, ep_ring, false,
+			  setup->bRequestType | setup->bRequest << 8 |
+				le16_to_cpu(setup->wValue) << 16,
+			  le16_to_cpu(setup->wIndex) |
+				le16_to_cpu(setup->wLength) << 16,
+			  TRB_LEN(8) | TRB_INTR_TARGET(0),
+			  field);
+	} else {
+		/* Queue data TRB */
+		field = TRB_ISP | TRB_TYPE(TRB_DATA);
+		if (start_cycle == 0)
+			field |= 0x1;
+		if (setup->bRequestType & USB_DIR_IN)
+			field |= TRB_DIR_IN;
+
+		remainder = xhci_td_remainder(xhci, 0,
+					   urb->transfer_buffer_length,
+					   urb->transfer_buffer_length,
+					   urb, 1);
+
+		length_field = TRB_LEN(urb->transfer_buffer_length) |
+			TRB_TD_SIZE(remainder) |
+			TRB_INTR_TARGET(0);
+
+		queue_trb(xhci, ep_ring, true,
+			  lower_32_bits(urb->transfer_dma),
+			  upper_32_bits(urb->transfer_dma),
+			  length_field,
+			  field);
+
+		/* Save the DMA address of the last TRB in the TD */
+		td->last_trb = ep_ring->enqueue;
+
+		/* Queue status TRB */
+		field = TRB_IOC | TRB_TYPE(TRB_STATUS);
+		if (!(setup->bRequestType & USB_DIR_IN))
+			field |= TRB_DIR_IN;
+
+		queue_trb(xhci, ep_ring, false,
+			  0,
+			  0,
+			  TRB_INTR_TARGET(0),
+			  field | ep_ring->cycle_state);
+	}
+
+	giveback_first_trb(xhci, slot_id, ep_index, 0, start_cycle, start_trb);
+	return 0;
+}
+
+/*
  * The transfer burst count field of the isochronous TRB defines the number of
  * bursts that are required to move all packets in this TD.  Only SuperSpeed
  * devices can burst up to bMaxBurst number of packets per service interval.
@@ -4115,7 +4259,7 @@ void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 	int ret;
 
 	xhci_dbg_trace(xhci, trace_xhci_dbg_cancel_urb,
-		"Set TR Deq Ptr cmd, new deq seg = %p (0x%llx dma), new deq ptr = %p (0x%llx dma), new cycle = %u",
+		"Set TR Deq Ptr cmd, new deq seg = %pK (0x%llx dma), new deq ptr = %pK (0x%llx dma), new cycle = %u",
 		deq_state->new_deq_seg,
 		(unsigned long long)deq_state->new_deq_seg->dma,
 		deq_state->new_deq_ptr,
@@ -4127,7 +4271,7 @@ void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 				    deq_state->new_deq_ptr);
 	if (addr == 0) {
 		xhci_warn(xhci, "WARN Cannot submit Set TR Deq Ptr\n");
-		xhci_warn(xhci, "WARN deq seg = %p, deq pt = %p\n",
+		xhci_warn(xhci, "WARN deq seg = %pK, deq pt = %pK\n",
 			  deq_state->new_deq_seg, deq_state->new_deq_ptr);
 		return;
 	}

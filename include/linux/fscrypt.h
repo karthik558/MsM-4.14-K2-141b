@@ -66,6 +66,7 @@ struct fscrypt_operations {
 		struct super_block *sb);
 	bool (*empty_dir)(struct inode *inode);
 	unsigned int max_namelen;
+	bool (*is_encrypted)(struct inode *);
 	bool (*has_stable_inodes)(struct super_block *sb);
 	void (*get_ino_and_lblk_bits)(struct super_block *sb,
 				      int *ino_bits_ret, int *lblk_bits_ret);

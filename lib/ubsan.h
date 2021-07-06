@@ -44,22 +44,18 @@ struct type_mismatch_data_v1 {
 	unsigned char type_check_kind;
 };
 
+struct nonnull_arg_data {
+	struct source_location location;
+	struct type_descriptor *type;
+	unsigned char log_alignment;
+	unsigned char type_check_kind;
+};
+
 struct type_mismatch_data_common {
 	struct source_location *location;
 	struct type_descriptor *type;
 	unsigned long alignment;
 	unsigned char type_check_kind;
-};
-
-struct nonnull_arg_data {
-	struct source_location location;
-	struct source_location attr_location;
-	int arg_index;
-};
-
-struct nonnull_return_data {
-	struct source_location location;
-	struct source_location attr_location;
 };
 
 struct vla_bound_data {

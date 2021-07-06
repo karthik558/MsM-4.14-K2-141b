@@ -1030,7 +1030,7 @@ idle_timeout:
 		/* caller was supposed to have unlinked any requests;
 		 * that's not our job.  just leak this memory.
 		 */
-		ehci_err (ehci, "qh %p (#%02x) state %d%s\n",
+		ehci_err (ehci, "qh %pK (#%02x) state %d%s\n",
 			qh, ep->desc.bEndpointAddress, qh->qh_state,
 			list_empty (&qh->qtd_list) ? "" : "(has tds)");
 		break;
@@ -1319,6 +1319,11 @@ MODULE_LICENSE ("GPL");
 #ifdef CONFIG_USB_EHCI_MV
 #include "ehci-mv.c"
 #define        PLATFORM_DRIVER         ehci_mv_driver
+#endif
+
+#ifdef CONFIG_USB_EHCI_MSM_HSIC
+#include "ehci-msm-hsic.c"
+#define PLATFORM_DRIVER                ehci_msm_hsic_driver
 #endif
 
 static int __init ehci_hcd_init(void)

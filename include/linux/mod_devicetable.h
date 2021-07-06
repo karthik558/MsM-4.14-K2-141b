@@ -293,7 +293,7 @@ struct pcmcia_device_id {
 #define INPUT_DEVICE_ID_LED_MAX		0x0f
 #define INPUT_DEVICE_ID_SND_MAX		0x07
 #define INPUT_DEVICE_ID_FF_MAX		0x7f
-#define INPUT_DEVICE_ID_SW_MAX		0x10
+#define INPUT_DEVICE_ID_SW_MAX		0x20
 #define INPUT_DEVICE_ID_PROP_MAX	0x1f
 
 #define INPUT_DEVICE_ID_MATCH_BUS	1
@@ -452,11 +452,33 @@ struct spi_device_id {
 	kernel_ulong_t driver_data;	/* Data private to the driver */
 };
 
+/* gpr */
+#define GPR_NAME_SIZE	32
+#define GPR_MODULE_PREFIX "gpr:"
+
+struct gpr_device_id {
+	char name[GPR_NAME_SIZE];
+	__u32 domain_id;
+	__u32 svc_id;
+	__u32 svc_version;
+	kernel_ulong_t driver_data;	/* Data private to the driver */
+};
+
 #define SPMI_NAME_SIZE	32
 #define SPMI_MODULE_PREFIX "spmi:"
 
 struct spmi_device_id {
 	char name[SPMI_NAME_SIZE];
+	kernel_ulong_t driver_data;	/* Data private to the driver */
+};
+
+/* soundwire */
+
+#define SOUNDWIRE_NAME_SIZE	32
+#define SOUNDWIRE_MODULE_PREFIX "swr:"
+
+struct swr_device_id {
+	char name[SOUNDWIRE_NAME_SIZE];
 	kernel_ulong_t driver_data;	/* Data private to the driver */
 };
 
@@ -507,6 +529,14 @@ struct dmi_system_id {
 
 #define DMI_MATCH(a, b)	{ .slot = a, .substr = b }
 #define DMI_EXACT_MATCH(a, b)	{ .slot = a, .substr = b, .exact_match = 1 }
+
+#define SLIMBUS_NAME_SIZE	32
+#define SLIMBUS_MODULE_PREFIX "slim:"
+
+struct slim_device_id {
+	char name[SLIMBUS_NAME_SIZE];
+	kernel_ulong_t driver_data;	/* Data private to the driver */
+};
 
 #define PLATFORM_NAME_SIZE	20
 #define PLATFORM_MODULE_PREFIX	"platform:"
@@ -692,6 +722,21 @@ struct fsl_mc_device_id {
 	__u16 vendor;
 	const char obj_type[16];
 };
+
+#define MHI_NAME_SIZE 32
+
+/**
+ * struct mhi_device_id - MHI device identification
+ * @chan: MHI channel name
+ * @driver_data: driver data;
+ */
+
+struct mhi_device_id {
+	const char chan[MHI_NAME_SIZE];
+	kernel_ulong_t driver_data;
+};
+
+
 
 
 #endif /* LINUX_MOD_DEVICETABLE_H */

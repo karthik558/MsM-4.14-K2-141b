@@ -25,10 +25,13 @@ amlogic	Amlogic, Inc.
 ampire	Ampire Co., Ltd.
 ams	AMS AG
 amstaos	AMS-Taos Inc.
+android        Google Inc.
 analogix	Analogix Semiconductor, Inc.
 andestech	Andes Technology Corporation
+android	Google
 apm	Applied Micro Circuits Corporation (APM)
 aptina	Aptina Imaging
+aquantia	Aquantia Corporation
 arasan	Arasan Chip Systems
 arctic	Arctic Sand
 aries	Aries Embedded GmbH
@@ -112,11 +115,13 @@ everest	Everest Semiconductor Co. Ltd.
 everspin	Everspin Technologies, Inc.
 exar	Exar Corporation
 excito	Excito
+explore Explore Semiconductor, Inc. Limited
 ezchip	EZchip Semiconductor
 faraday	Faraday Technology Corporation
 fcs	Fairchild Semiconductor
 firefly	Firefly
 focaltech	FocalTech Systems Co.,Ltd
+fpc	Fingerprint Cards AB.
 friendlyarm	Guangzhou FriendlyARM Computer Tech Co., Ltd
 fsl	Freescale Semiconductor
 fujitsu	Fujitsu Ltd.
@@ -134,6 +139,7 @@ grinn	Grinn
 grmn	Garmin Limited
 gumstix	Gumstix, Inc.
 gw	Gateworks Corporation
+halo	Halo Microelectronics Co., Ltd.
 hannstar	HannStar Display Corporation
 haoyu	Haoyu Microelectronic Co. Ltd.
 hardkernel	Hardkernel Co., Ltd
@@ -191,6 +197,7 @@ linux	Linux-specific binding
 lltc	Linear Technology Corporation
 lsi	LSI Corp. (LSI Logic)
 lwn	Liebherr-Werk Nenzing GmbH
+lt	Lontium Semiconductor Corporation
 macnica	Macnica Americas
 marvell	Marvell Technology Group Ltd.
 maxim	Maxim Integrated Products
@@ -271,6 +278,7 @@ qemu	QEMU, a generic and open source machine emulator and virtualizer
 qi	Qi Hardware
 qiaodian	QiaoDian XianShi Corporation
 qnap	QNAP Systems, Inc.
+qvm	BlackBerry Ltd
 radxa	Radxa
 raidsonic	RaidSonic Technology GmbH
 ralink	Mediatek/Ralink Technology Corp.
@@ -327,7 +335,7 @@ summit	Summit microelectronics
 sunchip	Shenzhen Sunchip Technology Co., Ltd
 SUNW	Sun Microsystems, Inc
 swir	Sierra Wireless
-syna	Synaptics Inc.
+synaptics	Synaptics Inc.
 synology	Synology, Inc.
 tbs	TBS Technologies
 tcg	Trusted Computing Group
@@ -382,3 +390,4 @@ zidoo	Shenzhen Zidoo Technology Co., Ltd.
 zii	Zodiac Inflight Innovations
 zte	ZTE Corp.
 zyxel	ZyXEL Communications Corp.
+inven   InvenSense, Inc.

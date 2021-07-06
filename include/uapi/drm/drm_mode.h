@@ -99,6 +99,12 @@ extern "C" {
 #define  DRM_MODE_FLAG_PIC_AR_16_9 \
 			(DRM_MODE_PICTURE_ASPECT_16_9<<19)
 
+#define  DRM_MODE_FLAG_SUPPORTS_RGB		(1<<23)
+#define  DRM_MODE_FLAG_SUPPORTS_YUV		(1<<24)
+#define  DRM_MODE_FLAG_VID_MODE_PANEL		(1<<29)
+#define  DRM_MODE_FLAG_CMD_MODE_PANEL		(1<<30)
+#define  DRM_MODE_FLAG_SEAMLESS			(1<<31)
+
 /* DPMS flags */
 /* bit compatible with the xorg definitions. */
 #define DRM_MODE_DPMS_ON	0
@@ -439,6 +445,7 @@ struct drm_mode_fb_cmd {
 
 #define DRM_MODE_FB_INTERLACED	(1<<0) /* for interlaced framebuffers */
 #define DRM_MODE_FB_MODIFIERS	(1<<1) /* enables ->modifer[] */
+#define DRM_MODE_FB_SECURE	(1<<2) /* for secure framebuffers */
 
 struct drm_mode_fb_cmd2 {
 	__u32 fb_id;
@@ -780,6 +787,72 @@ struct drm_mode_create_blob {
  */
 struct drm_mode_destroy_blob {
 	__u32 blob_id;
+};
+
+/**
+ * Lease mode resources, creating another drm_master.
+ */
+struct drm_mode_create_lease {
+	/** Pointer to array of object ids (__u32) */
+	__u64 object_ids;
+	/** Number of object ids */
+	__u32 object_count;
+	/** flags for new FD (O_CLOEXEC, etc) */
+	__u32 flags;
+
+	/** Return: unique identifier for lessee. */
+	__u32 lessee_id;
+	/** Return: file descriptor to new drm_master file */
+	__u32 fd;
+};
+
+/**
+ * List lesses from a drm_master
+ */
+struct drm_mode_list_lessees {
+	/** Number of lessees.
+	 * On input, provides length of the array.
+	 * On output, provides total number. No
+	 * more than the input number will be written
+	 * back, so two calls can be used to get
+	 * the size and then the data.
+	 */
+	__u32 count_lessees;
+	__u32 pad;
+
+	/** Pointer to lessees.
+	 * pointer to __u64 array of lessee ids
+	 */
+	__u64 lessees_ptr;
+};
+
+/**
+ * Get leased objects
+ */
+struct drm_mode_get_lease {
+	/** Number of leased objects.
+	 * On input, provides length of the array.
+	 * On output, provides total number. No
+	 * more than the input number will be written
+	 * back, so two calls can be used to get
+	 * the size and then the data.
+	 */
+	__u32 count_objects;
+	__u32 pad;
+
+	/** Pointer to objects.
+	 * pointer to __u32 array of object ids
+	 */
+	__u64 objects_ptr;
+};
+
+/**
+ * Revoke lease
+ */
+struct drm_mode_revoke_lease {
+	/** Unique ID of lessee
+	 */
+	__u32 lessee_id;
 };
 
 #if defined(__cplusplus)

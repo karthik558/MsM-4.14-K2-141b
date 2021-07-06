@@ -150,6 +150,7 @@ source "drivers/media/platform/am437x/Kconfig"
 source "drivers/media/platform/xilinx/Kconfig"
 source "drivers/media/platform/rcar-vin/Kconfig"
 source "drivers/media/platform/atmel/Kconfig"
+source "drivers/media/platform/msm/Kconfig"
 
 config VIDEO_TI_CAL
 	tristate "TI CAL (Camera Adaptation Layer) driver"
@@ -538,6 +539,8 @@ if DVB_PLATFORM_DRIVERS
 source "drivers/media/platform/sti/c8sectpfe/Kconfig"
 endif #DVB_PLATFORM_DRIVERS
 
+source "drivers/media/platform/msm/Kconfig"
+
 menuconfig CEC_PLATFORM_DRIVERS
 	bool "CEC platform devices"
 	depends on MEDIA_CEC_SUPPORT
@@ -615,3 +618,4 @@ config VIDEO_RCAR_DRIF
 	  will be called rcar_drif.
 
 endif # SDR_PLATFORM_DRIVERS
+source "drivers/media/platform/msm/Kconfig"

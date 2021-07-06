@@ -2,6 +2,7 @@
  * drivers/staging/android/ion/ion.h
  *
  * Copyright (C) 2011 Google, Inc.
+ * Copyright (c) 2011-2020, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -27,8 +28,40 @@
 #include <linux/shrinker.h>
 #include <linux/types.h>
 #include <linux/miscdevice.h>
-
+#include <linux/bitops.h>
+#include "ion_kernel.h"
 #include "../uapi/ion.h"
+#include "../uapi/msm_ion.h"
+
+#define ION_ADSP_HEAP_NAME	"adsp"
+#define ION_SYSTEM_HEAP_NAME	"system"
+#define ION_MM_HEAP_NAME	"mm"
+#define ION_SPSS_HEAP_NAME	"spss"
+#define ION_SECURE_CARVEOUT_HEAP_NAME	"secure_carveout"
+#define ION_USER_CONTIG_HEAP_NAME	"user_contig"
+#define ION_QSECOM_HEAP_NAME	"qsecom"
+#define ION_QSECOM_TA_HEAP_NAME	"qsecom_ta"
+#define ION_SECURE_HEAP_NAME	"secure_heap"
+#define ION_SECURE_DISPLAY_HEAP_NAME "secure_display"
+#define ION_AUDIO_HEAP_NAME    "audio"
+#define ION_VIDEO_HEAP_NAME    "video"
+
+#define ION_IS_CACHED(__flags)  ((__flags) & ION_FLAG_CACHED)
+
+/**
+ * Debug feature. Make ION allocations DMA
+ * ready to help identify clients who are wrongly
+ * dependending on ION allocations being DMA
+ * ready.
+ *
+ * As default set to 'false' since ION allocations
+ * are no longer required to be DMA ready
+ */
+#ifdef CONFIG_ION_FORCE_DMA_SYNC
+#define MAKE_ION_ALLOC_DMA_READY 1
+#else
+#define MAKE_ION_ALLOC_DMA_READY 0
+#endif
 
 /**
  * struct ion_platform_heap - defines a heap in the given platform
@@ -54,6 +87,23 @@ struct ion_platform_heap {
 };
 
 /**
+ * struct ion_platform_data - array of platform heaps passed from board file
+ * @nr:    number of structures in the array
+ * @heaps: array of platform_heap structions
+ *
+ * Provided by the board file in the form of platform data to a platform device.
+ */
+struct ion_platform_data {
+	int nr;
+	struct ion_platform_heap *heaps;
+};
+
+struct ion_vma_list {
+	struct list_head list;
+	struct vm_area_struct *vma;
+};
+
+/**
  * struct ion_buffer - metadata for a particular buffer
  * @ref:		reference count
  * @node:		node in the ion_device buffers tree
@@ -68,6 +118,7 @@ struct ion_platform_heap {
  * @kmap_cnt:		number of times the buffer is mapped to the kernel
  * @vaddr:		the kernel mapping if kmap_cnt is not zero
  * @sg_table:		the sg table for the buffer if dmap_cnt is not zero
+ * @vmas:		list of vma's mapping this buffer
  */
 struct ion_buffer {
 	union {
@@ -80,12 +131,15 @@ struct ion_buffer {
 	unsigned long private_flags;
 	size_t size;
 	void *priv_virt;
+	/* Protect ion buffer */
 	struct mutex lock;
 	int kmap_cnt;
 	void *vaddr;
 	struct sg_table *sg_table;
 	struct list_head attachments;
+	struct list_head vmas;
 };
+
 void ion_buffer_destroy(struct ion_buffer *buffer);
 
 /**
@@ -98,11 +152,18 @@ void ion_buffer_destroy(struct ion_buffer *buffer);
 struct ion_device {
 	struct miscdevice dev;
 	struct rb_root buffers;
+	/* buffer_lock used for adding and removing buffers */
 	struct mutex buffer_lock;
 	struct rw_semaphore lock;
 	struct plist_head heaps;
 	struct dentry *debug_root;
 	int heap_cnt;
+};
+
+/* refer to include/linux/pm.h */
+struct ion_pm_ops {
+	int (*freeze)(struct ion_heap *heap);
+	int (*restore)(struct ion_heap *heap);
 };
 
 /**
@@ -130,6 +191,7 @@ struct ion_heap_ops {
 	int (*map_user)(struct ion_heap *mapper, struct ion_buffer *buffer,
 			struct vm_area_struct *vma);
 	int (*shrink)(struct ion_heap *heap, gfp_t gfp_mask, int nr_to_scan);
+	struct ion_pm_ops pm;
 };
 
 /**
@@ -160,6 +222,7 @@ struct ion_heap_ops {
  *			MUST be unique
  * @name:		used for debugging
  * @shrinker:		a shrinker for the heap
+ * @priv:               private heap data
  * @free_list:		free list head if deferred free is used
  * @free_list_size	size of the deferred free list in bytes
  * @lock:		protects the free list
@@ -182,11 +245,14 @@ struct ion_heap {
 	unsigned int id;
 	const char *name;
 	struct shrinker shrinker;
+	void *priv;
 	struct list_head free_list;
 	size_t free_list_size;
+	/* Protect the free list */
 	spinlock_t free_lock;
 	wait_queue_head_t waitqueue;
 	struct task_struct *task;
+	atomic_long_t total_allocated;
 
 	int (*debug_show)(struct ion_heap *heap, struct seq_file *, void *);
 };
@@ -209,10 +275,18 @@ bool ion_buffer_cached(struct ion_buffer *buffer);
 bool ion_buffer_fault_user_mappings(struct ion_buffer *buffer);
 
 /**
+ * ion_device_create - allocates and returns an ion device
+ *
+ * returns a valid device or -PTR_ERR
+ */
+struct ion_device *ion_device_create(void);
+
+/**
  * ion_device_add_heap - adds a heap to the ion device
+ * @dev:		the device
  * @heap:		the heap to add
  */
-void ion_device_add_heap(struct ion_heap *heap);
+void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap);
 
 /**
  * some helpers for common operations on buffers using the sg_table
@@ -225,9 +299,7 @@ int ion_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
 int ion_heap_buffer_zero(struct ion_buffer *buffer);
 int ion_heap_pages_zero(struct page *page, size_t size, pgprot_t pgprot);
 
-int ion_alloc(size_t len,
-	      unsigned int heap_id_mask,
-	      unsigned int flags);
+int ion_alloc_fd(size_t len, unsigned int heap_id_mask, unsigned int flags);
 
 /**
  * ion_heap_init_shrinker
@@ -290,8 +362,7 @@ size_t ion_heap_freelist_drain(struct ion_heap *heap, size_t size);
  * the heap.ops.free callback honoring the ION_PRIV_FLAG_SHRINKER_FREE
  * flag.
  */
-size_t ion_heap_freelist_shrink(struct ion_heap *heap,
-				size_t size);
+size_t ion_heap_freelist_shrink(struct ion_heap *heap, size_t size);
 
 /**
  * ion_heap_freelist_size - returns the size of the freelist in bytes
@@ -299,6 +370,47 @@ size_t ion_heap_freelist_shrink(struct ion_heap *heap,
  */
 size_t ion_heap_freelist_size(struct ion_heap *heap);
 
+/**
+ * functions for creating and destroying the built in ion heaps.
+ * architectures can add their own custom architecture specific
+ * heaps as appropriate.
+ */
+
+struct ion_heap *ion_heap_create(struct ion_platform_heap *heap_data);
+
+struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused);
+struct ion_heap *ion_system_contig_heap_create(struct ion_platform_heap *heap);
+
+struct ion_heap *ion_carveout_heap_create(struct ion_platform_heap *heap_data);
+
+struct ion_heap *ion_chunk_heap_create(struct ion_platform_heap *heap_data);
+
+#ifdef CONFIG_CMA
+struct ion_heap *ion_secure_cma_heap_create(struct ion_platform_heap *data);
+void ion_secure_cma_heap_destroy(struct ion_heap *heap);
+
+struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *data);
+#else
+static inline struct ion_heap
+			*ion_secure_cma_heap_create(struct ion_platform_heap *h)
+{
+	return NULL;
+}
+
+static inline void ion_cma_heap_destroy(struct ion_heap *h) {}
+
+static inline struct ion_heap *ion_cma_heap_create(struct ion_platform_heap *h)
+{
+	return NULL;
+}
+#endif
+
+struct ion_heap *ion_system_secure_heap_create(struct ion_platform_heap *heap);
+
+struct ion_heap *ion_cma_secure_heap_create(struct ion_platform_heap *heap);
+
+struct ion_heap *ion_secure_carveout_heap_create(
+			struct ion_platform_heap *heap);
 
 /**
  * functions for creating and destroying a heap pool -- allows you
@@ -332,6 +444,7 @@ struct ion_page_pool {
 	bool cached;
 	struct list_head high_items;
 	struct list_head low_items;
+	/* Protect the pool */
 	struct mutex mutex;
 	gfp_t gfp_mask;
 	unsigned int order;
@@ -341,8 +454,15 @@ struct ion_page_pool {
 struct ion_page_pool *ion_page_pool_create(gfp_t gfp_mask, unsigned int order,
 					   bool cached);
 void ion_page_pool_destroy(struct ion_page_pool *pool);
-struct page *ion_page_pool_alloc(struct ion_page_pool *pool);
+struct page *ion_page_pool_alloc(struct ion_page_pool *a, bool *from_pool);
 void ion_page_pool_free(struct ion_page_pool *pool, struct page *page);
+
+struct ion_heap *get_ion_heap(int heap_id);
+struct page *ion_page_pool_alloc_pool_only(struct ion_page_pool *a);
+void ion_page_pool_free_immediate(struct ion_page_pool *pool,
+				  struct page *page);
+int ion_page_pool_total(struct ion_page_pool *pool, bool high);
+size_t ion_system_heap_secure_page_pool_total(struct ion_heap *heap, int vmid);
 
 #ifdef CONFIG_ION_SYSTEM_HEAP
 long ion_page_pool_nr_pages(void);
@@ -359,6 +479,20 @@ static inline long ion_page_pool_nr_pages(void) { return 0; }
  */
 int ion_page_pool_shrink(struct ion_page_pool *pool, gfp_t gfp_mask,
 			 int nr_to_scan);
+
+/**
+ * ion_pages_sync_for_device - cache flush pages for use with the specified
+ *                             device
+ * @dev:		the device the pages will be used with
+ * @page:		the first page to be flushed
+ * @size:		size in bytes of region to be flushed
+ * @dir:		direction of dma transfer
+ */
+void ion_pages_sync_for_device(struct device *dev, struct page *page,
+			       size_t size, enum dma_data_direction dir);
+
+int ion_walk_heaps(int heap_id, enum ion_heap_type type, void *data,
+		   int (*f)(struct ion_heap *heap, void *data));
 
 long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 

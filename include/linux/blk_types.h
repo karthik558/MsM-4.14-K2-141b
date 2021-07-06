@@ -150,6 +150,8 @@ struct bio {
 				 * throttling rules. Don't do it again. */
 #define BIO_TRACE_COMPLETION 11	/* bio_endio() should trace the final completion
 				 * of this bio. */
+#define BIO_QUEUE_ENTERED 11	/* can use blk_queue_enter_live() */
+
 /* See BVEC_POOL_OFFSET below before adding new flags */
 
 /*
@@ -240,10 +242,17 @@ enum req_flag_bits {
 	__REQ_RAHEAD,		/* read ahead, can fail anytime */
 	__REQ_BACKGROUND,	/* background IO */
 
+	__REQ_SORTED = __REQ_RAHEAD, /* elevator knows about this request */
 	/* command specific flags for REQ_OP_WRITE_ZEROES: */
 	__REQ_NOUNMAP,		/* do not free blocks when zeroing */
 
+	__REQ_URGENT,		/* urgent request */
 	__REQ_NOWAIT,           /* Don't wait if request will block */
+	/*
+	 * set for "ide_preempt" requests and also for requests for which the
+	 * SCSI "quiesce" state must be ignored.
+	 */
+	__REQ_PREEMPT,
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -253,6 +262,7 @@ enum req_flag_bits {
 #define REQ_SYNC		(1ULL << __REQ_SYNC)
 #define REQ_META		(1ULL << __REQ_META)
 #define REQ_PRIO		(1ULL << __REQ_PRIO)
+#define REQ_URGENT		(1ULL << __REQ_URGENT)
 #define REQ_NOMERGE		(1ULL << __REQ_NOMERGE)
 #define REQ_IDLE		(1ULL << __REQ_IDLE)
 #define REQ_INTEGRITY		(1ULL << __REQ_INTEGRITY)
@@ -263,6 +273,7 @@ enum req_flag_bits {
 
 #define REQ_NOUNMAP		(1ULL << __REQ_NOUNMAP)
 #define REQ_NOWAIT		(1ULL << __REQ_NOWAIT)
+#define REQ_PREEMPT		(1ULL << __REQ_PREEMPT)
 
 #define REQ_FAILFAST_MASK \
 	(REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT | REQ_FAILFAST_DRIVER)

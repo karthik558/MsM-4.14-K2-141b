@@ -43,6 +43,7 @@
  */
 static bool clean_pages_on_read;
 static bool clean_pages_on_decompress;
+static bool noswap_randomize;
 
 /*
  *	The swap map is a data structure used for keeping track of each page
@@ -605,9 +606,10 @@ static int crc32_threadfn(void *data)
 		}
 		atomic_set(&d->ready, 0);
 
-		for (i = 0; i < d->run_threads; i++)
-			*d->crc32 = crc32_le(*d->crc32,
-			                     d->unc[i], *d->unc_len[i]);
+		if (!IS_ENABLED(CONFIG_HIBERNATION_SKIP_CRC))
+			for (i = 0; i < d->run_threads; i++)
+				*d->crc32 = crc32_le(*d->crc32,
+						d->unc[i], *d->unc_len[i]);
 		atomic_set(&d->stop, 1);
 		wake_up(&d->done);
 	}
@@ -1453,7 +1455,8 @@ out_finish:
 		if (!snapshot_image_loaded(snapshot))
 			ret = -ENODATA;
 		if (!ret) {
-			if (swsusp_header->flags & SF_CRC32_MODE) {
+			if ((swsusp_header->flags & SF_CRC32_MODE) &&
+			    (!IS_ENABLED(CONFIG_HIBERNATION_SKIP_CRC))) {
 				if(handle->crc32 != swsusp_header->crc32) {
 					printk(KERN_ERR
 					       "PM: Invalid image CRC32!\n");
@@ -1531,6 +1534,9 @@ int swsusp_check(void)
 					    FMODE_READ, NULL);
 	if (!IS_ERR(hib_resume_bdev)) {
 		set_blocksize(hib_resume_bdev, PAGE_SIZE);
+		if (noswap_randomize)
+			hib_resume_bdev->bd_disk->flags |=
+					GENHD_FL_NO_RANDOMIZE;
 		clear_page(swsusp_header);
 		error = hib_submit_io(REQ_OP_READ, 0,
 					swsusp_resume_block,
@@ -1540,10 +1546,12 @@ int swsusp_check(void)
 
 		if (!memcmp(HIBERNATE_SIG, swsusp_header->sig, 10)) {
 			memcpy(swsusp_header->sig, swsusp_header->orig_sig, 10);
+#ifndef CONFIG_HIBERNATION_IMAGE_REUSE
 			/* Reset swap signature now */
 			error = hib_submit_io(REQ_OP_WRITE, REQ_SYNC,
 						swsusp_resume_block,
 						swsusp_header, NULL);
+#endif
 		} else {
 			error = -EINVAL;
 		}
@@ -1616,3 +1624,11 @@ static int swsusp_header_init(void)
 }
 
 core_initcall(swsusp_header_init);
+
+static int __init noswap_randomize_setup(char *str)
+{
+	noswap_randomize = true;
+	return 1;
+}
+
+__setup("noswap_randomize", noswap_randomize_setup);

@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2019-2020, The Linux Foundation. All rights reserved.
+ *
  * Copyright (c) 2016, BayLibre, SAS. All rights reserved.
  * Author: Neil Armstrong <narmstrong@baylibre.com>
  *
@@ -37,6 +39,9 @@
 #include "core.h"
 #include "pinconf.h"
 #include "pinctrl-utils.h"
+
+static bool in_kexec_panic;
+static struct notifier_block *panic_block;
 
 /* The chip models of sx150x */
 enum {
@@ -579,6 +584,14 @@ static void sx150x_irq_bus_sync_unlock(struct irq_data *d)
 	struct sx150x_pinctrl *pctl =
 			gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
+	/* In crash kexec panic path interrupt is disabled.
+	 * Writing to regmap will need interrupt/polling mode,
+	 * as it goes though i2c.
+	 */
+	if (in_kexec_panic) {
+		mutex_unlock(&pctl->lock);
+		return;
+	}
 	regmap_write(pctl->regmap, pctl->data->reg_irq_mask, pctl->irq.masked);
 	regmap_write(pctl->regmap, pctl->data->reg_sense, pctl->irq.sense);
 	mutex_unlock(&pctl->lock);
@@ -1100,6 +1113,14 @@ const struct regmap_config sx150x_regmap_config = {
 	.volatile_reg = sx150x_reg_volatile,
 };
 
+static int sx150x_panic_handler(struct notifier_block *this,
+				unsigned long event, void *ptr)
+{
+	if (crash_kexec_post_notifiers)
+		in_kexec_panic = 1;
+	return NOTIFY_DONE;
+}
+
 static int sx150x_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
@@ -1251,10 +1272,47 @@ static int sx150x_probe(struct i2c_client *client,
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
+static int sx150x_restore(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct sx150x_pinctrl *pctl = i2c_get_clientdata(client);
+	int ret;
+
+	ret = sx150x_init_hw(pctl);
+	if (ret)
+		return ret;
+
+	ret = pinctrl_force_default(pctl->pctldev);
+	if (ret) {
+		dev_err(dev, "Failed to enable pinctrl device\n");
+		return ret;
+	}
+
+	if (client->irq > 0) {
+		mutex_lock(&pctl->lock);
+		regmap_write(pctl->regmap,
+				pctl->data->reg_irq_mask, pctl->irq.masked);
+		regmap_write(pctl->regmap,
+				pctl->data->reg_sense, pctl->irq.sense);
+		mutex_unlock(&pctl->lock);
+	}
+
+	return 0;
+}
+
+static const struct dev_pm_ops sx150x_pm = {
+	.restore = sx150x_restore,
+};
+#endif
+
 static struct i2c_driver sx150x_driver = {
 	.driver = {
 		.name = "sx150x-pinctrl",
 		.of_match_table = of_match_ptr(sx150x_of_match),
+#ifdef CONFIG_PM_SLEEP
+		.pm = &sx150x_pm,
+#endif
 	},
 	.probe    = sx150x_probe,
 	.id_table = sx150x_id,
@@ -1262,6 +1320,12 @@ static struct i2c_driver sx150x_driver = {
 
 static int __init sx150x_init(void)
 {
+	panic_block = kzalloc(sizeof(*panic_block), GFP_KERNEL);
+	if (!panic_block)
+		return -ENOMEM;
+	panic_block->notifier_call = sx150x_panic_handler;
+	atomic_notifier_chain_register(&panic_notifier_list,
+				       panic_block);
 	return i2c_add_driver(&sx150x_driver);
 }
 subsys_initcall(sx150x_init);

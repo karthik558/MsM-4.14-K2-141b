@@ -45,6 +45,8 @@
 #include "blk-mq-sched.h"
 #include "blk-wbt.h"
 
+#include <linux/math64.h>
+
 #ifdef CONFIG_DEBUG_FS
 struct dentry *blk_debugfs_root;
 #endif
@@ -349,6 +351,34 @@ void blk_sync_queue(struct request_queue *q)
 }
 EXPORT_SYMBOL(blk_sync_queue);
 
+void blk_set_preempt_only(struct request_queue *q, bool preempt_only)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(q->queue_lock, flags);
+	if (preempt_only)
+		queue_flag_set(QUEUE_FLAG_PREEMPT_ONLY, q);
+	else
+		queue_flag_clear(QUEUE_FLAG_PREEMPT_ONLY, q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
+
+	/*
+	 * The synchronize_rcu() implicied in blk_mq_freeze_queue()
+	 * or the explicit one will make sure the above write on
+	 * PREEMPT_ONLY is observed in blk_queue_enter() before
+	 * running blk_mq_unfreeze_queue().
+	 *
+	 * blk_mq_freeze_queue() also drains up any request in queue,
+	 * so blk_queue_enter() will see the above updated value of
+	 * PREEMPT flag before any new allocation.
+	 */
+	if (!blk_mq_freeze_queue(q))
+		synchronize_rcu();
+
+	blk_mq_unfreeze_queue(q);
+}
+EXPORT_SYMBOL(blk_set_preempt_only);
+
 /**
  * __blk_run_queue_uncond - run a queue whether or not it has been stopped
  * @q:	The queue to run
@@ -620,6 +650,9 @@ void blk_set_queue_dying(struct request_queue *q)
 		}
 		spin_unlock_irq(q->queue_lock);
 	}
+
+	/* Make blk_queue_enter() reexamine the DYING flag. */
+	wake_up_all(&q->mq_freeze_wq);
 }
 EXPORT_SYMBOL_GPL(blk_set_queue_dying);
 
@@ -684,6 +717,37 @@ void blk_cleanup_queue(struct request_queue *q)
 	/* @q won't process any more request, flush async actions */
 	del_timer_sync(&q->backing_dev_info->laptop_mode_wb_timer);
 	blk_sync_queue(q);
+
+	/*
+	 * I/O scheduler exit is only safe after the sysfs scheduler attribute
+	 * has been removed.
+	 */
+	WARN_ON_ONCE(q->kobj.state_in_sysfs);
+
+	/*
+	 * Since the I/O scheduler exit code may access cgroup information,
+	 * perform I/O scheduler exit before disassociating from the block
+	 * cgroup controller.
+	 */
+	if (q->elevator) {
+		ioc_clear_queue(q);
+		elevator_exit(q, q->elevator);
+		q->elevator = NULL;
+	}
+
+	/*
+	 * Remove all references to @q from the block cgroup controller before
+	 * restoring @q->queue_lock to avoid that restoring this pointer causes
+	 * e.g. blkcg_print_blkgs() to crash.
+	 */
+	blkcg_exit_queue(q);
+
+	/*
+	 * Since the cgroup code may dereference the @q->backing_dev_info
+	 * pointer, only decrease its reference count after having removed the
+	 * association with the block cgroup controller.
+	 */
+	bdi_put(q->backing_dev_info);
 
 	if (q->mq_ops)
 		blk_mq_free_queue(q);
@@ -780,14 +844,22 @@ struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 }
 EXPORT_SYMBOL(blk_alloc_queue);
 
-int blk_queue_enter(struct request_queue *q, bool nowait)
+int blk_queue_enter(struct request_queue *q, unsigned int op)
 {
 	while (true) {
 
-		if (percpu_ref_tryget_live(&q->q_usage_counter))
-			return 0;
+		rcu_read_lock_sched();
+		if (__percpu_ref_tryget_live(&q->q_usage_counter)) {
+			if (likely((op & REQ_PREEMPT) ||
+					!blk_queue_preempt_only(q))) {
+				rcu_read_unlock_sched();
+				return 0;
+			} else
+				percpu_ref_put(&q->q_usage_counter);
+		}
+		rcu_read_unlock_sched();
 
-		if (nowait)
+		if (op & REQ_NOWAIT)
 			return -EBUSY;
 
 		/*
@@ -800,8 +872,10 @@ int blk_queue_enter(struct request_queue *q, bool nowait)
 		smp_rmb();
 
 		wait_event(q->mq_freeze_wq,
-			   !atomic_read(&q->mq_freeze_depth) ||
-			   blk_queue_dying(q));
+			   (!atomic_read(&q->mq_freeze_depth) &&
+			   ((op & REQ_PREEMPT) ||
+			    !blk_queue_preempt_only(q))) ||
+			    blk_queue_dying(q));
 		if (blk_queue_dying(q))
 			return -ENODEV;
 	}
@@ -1416,16 +1490,22 @@ static struct request *blk_old_get_request(struct request_queue *q,
 					   unsigned int op, gfp_t gfp_mask)
 {
 	struct request *rq;
+	int ret = 0;
 
 	WARN_ON_ONCE(q->mq_ops);
 
 	/* create ioc upfront */
 	create_io_context(gfp_mask, q->node);
 
+	ret = blk_queue_enter(q, (gfp_mask & __GFP_DIRECT_RECLAIM) ? op :
+			      op | REQ_NOWAIT);
+	if (ret)
+		return ERR_PTR(ret);
 	spin_lock_irq(q->queue_lock);
 	rq = get_request(q, op, NULL, gfp_mask);
 	if (IS_ERR(rq)) {
 		spin_unlock_irq(q->queue_lock);
+		blk_queue_exit(q);
 		return rq;
 	}
 
@@ -1445,6 +1525,7 @@ struct request *blk_get_request(struct request_queue *q, unsigned int op,
 		req = blk_mq_alloc_request(q, op,
 			(gfp_mask & __GFP_DIRECT_RECLAIM) ?
 				0 : BLK_MQ_REQ_NOWAIT);
+
 		if (!IS_ERR(req) && q->mq_ops->initialize_rq_fn)
 			q->mq_ops->initialize_rq_fn(req);
 	} else {
@@ -1597,6 +1678,7 @@ void __blk_put_request(struct request_queue *q, struct request *req)
 		blk_free_request(rl, req);
 		freed_request(rl, sync, rq_flags);
 		blk_put_rl(rl);
+		blk_queue_exit(q);
 	}
 }
 EXPORT_SYMBOL_GPL(__blk_put_request);
@@ -1878,8 +1960,10 @@ get_rq:
 	 * Grab a free request. This is might sleep but can not fail.
 	 * Returns with the queue unlocked.
 	 */
+	blk_queue_enter_live(q);
 	req = get_request(q, bio->bi_opf, bio, GFP_NOIO);
 	if (IS_ERR(req)) {
+		blk_queue_exit(q);
 		__wbt_done(q->rq_wb, wb_acct);
 		if (PTR_ERR(req) == -ENOMEM)
 			bio->bi_status = BLK_STS_RESOURCE;
@@ -2004,7 +2088,8 @@ static inline int blk_partition_remap(struct bio *bio)
 		trace_block_bio_remap(bio->bi_disk->queue, bio, part_devt(p),
 				bio->bi_iter.bi_sector - p->start_sect);
 	} else {
-		printk("%s: fail for partition %d\n", __func__, bio->bi_partno);
+		printk_ratelimited("%s: fail for partition %d\n",
+			__func__, bio->bi_partno);
 		ret = -EIO;
 	}
 	rcu_read_unlock();
@@ -2056,7 +2141,7 @@ generic_make_request_checks(struct bio *bio)
 
 	q = bio->bi_disk->queue;
 	if (unlikely(!q)) {
-		printk(KERN_ERR
+		printk_ratelimited(KERN_ERR
 		       "generic_make_request: Trying to access "
 			"nonexistent block-device %s (%Lu)\n",
 			bio_devname(bio, b), (long long)bio->bi_iter.bi_sector);
@@ -2182,7 +2267,21 @@ blk_qc_t generic_make_request(struct bio *bio)
 	 * yet.
 	 */
 	struct bio_list bio_list_on_stack[2];
+	bool flags = 0;
+	struct request_queue *q = bio->bi_disk->queue;
 	blk_qc_t ret = BLK_QC_T_NONE;
+
+	if (bio->bi_opf & REQ_NOWAIT)
+		flags = BLK_MQ_REQ_NOWAIT;
+	if (bio_flagged(bio, BIO_QUEUE_ENTERED))
+		blk_queue_enter_live(q);
+	else if (blk_queue_enter(q, bio->bi_opf) < 0) {
+		if (!blk_queue_dying(q) && (bio->bi_opf & REQ_NOWAIT))
+			bio_wouldblock_error(bio);
+		else
+			bio_io_error(bio);
+		return ret;
+	}
 
 	if (!generic_make_request_checks(bio))
 		goto out;
@@ -2220,9 +2319,20 @@ blk_qc_t generic_make_request(struct bio *bio)
 	bio_list_init(&bio_list_on_stack[0]);
 	current->bio_list = bio_list_on_stack;
 	do {
-		struct request_queue *q = bio->bi_disk->queue;
+		bool enter_succeeded = true;
 
-		if (likely(blk_queue_enter(q, bio->bi_opf & REQ_NOWAIT) == 0)) {
+		if (unlikely(q != bio->bi_disk->queue)) {
+			if (q)
+				blk_queue_exit(q);
+			q = bio->bi_disk->queue;
+			flags = 0;
+			if (bio->bi_opf & REQ_NOWAIT)
+				flags = BLK_MQ_REQ_NOWAIT;
+			if (blk_queue_enter(q, bio->bi_opf) < 0)
+				enter_succeeded = false;
+		}
+
+		if (enter_succeeded) {
 			struct bio_list lower, same;
 
 			/* Create a fresh bio_list for all subordinate requests */
@@ -2231,8 +2341,6 @@ blk_qc_t generic_make_request(struct bio *bio)
 
 			if (!blk_crypto_submit_bio(&bio))
 				ret = q->make_request_fn(q, bio);
-
-			blk_queue_exit(q);
 
 			/* sort new bios into those for a lower level
 			 * and those for the same level
@@ -2254,12 +2362,15 @@ blk_qc_t generic_make_request(struct bio *bio)
 				bio_wouldblock_error(bio);
 			else
 				bio_io_error(bio);
+			q = NULL;
 		}
 		bio = bio_list_pop(&bio_list_on_stack[0]);
 	} while (bio);
 	current->bio_list = NULL; /* deactivate */
 
 out:
+	if (q)
+		blk_queue_exit(q);
 	return ret;
 }
 EXPORT_SYMBOL(generic_make_request);
@@ -2657,7 +2768,8 @@ struct request *blk_peek_request(struct request_queue *q)
 			__blk_end_request_all(rq, ret == BLKPREP_INVALID ?
 					BLK_STS_TARGET : BLK_STS_IOERR);
 		} else {
-			printk(KERN_ERR "%s: bad return=%d\n", __func__, ret);
+			printk_ratelimited(KERN_ERR "%s: bad return=%d\n",
+				__func__, ret);
 			break;
 		}
 	}
@@ -3680,3 +3792,85 @@ int __init blk_dev_init(void)
 
 	return 0;
 }
+
+/*
+ * Blk IO latency support. We want this to be as cheap as possible, so doing
+ * this lockless (and avoiding atomics), a few off by a few errors in this
+ * code is not harmful, and we don't want to do anything that is
+ * perf-impactful.
+ * TODO : If necessary, we can make the histograms per-cpu and aggregate
+ * them when printing them out.
+ */
+void
+blk_zero_latency_hist(struct io_latency_state *s)
+{
+	memset(s->latency_y_axis_read, 0,
+	       sizeof(s->latency_y_axis_read));
+	memset(s->latency_y_axis_write, 0,
+	       sizeof(s->latency_y_axis_write));
+	s->latency_reads_elems = 0;
+	s->latency_writes_elems = 0;
+}
+EXPORT_SYMBOL(blk_zero_latency_hist);
+
+ssize_t
+blk_latency_hist_show(struct io_latency_state *s, char *buf)
+{
+	int i;
+	int bytes_written = 0;
+	u_int64_t num_elem, elem;
+	int pct;
+
+	num_elem = s->latency_reads_elems;
+	if (num_elem > 0) {
+		bytes_written += scnprintf(buf + bytes_written,
+			   PAGE_SIZE - bytes_written,
+			   "IO svc_time Read Latency Histogram (n = %llu):\n",
+			   num_elem);
+		for (i = 0;
+		     i < ARRAY_SIZE(latency_x_axis_us);
+		     i++) {
+			elem = s->latency_y_axis_read[i];
+			pct = div64_u64(elem * 100, num_elem);
+			bytes_written += scnprintf(buf + bytes_written,
+						   PAGE_SIZE - bytes_written,
+						   "\t< %5lluus%15llu%15d%%\n",
+						   latency_x_axis_us[i],
+						   elem, pct);
+		}
+		/* Last element in y-axis table is overflow */
+		elem = s->latency_y_axis_read[i];
+		pct = div64_u64(elem * 100, num_elem);
+		bytes_written += scnprintf(buf + bytes_written,
+					   PAGE_SIZE - bytes_written,
+					   "\t> %5dms%15llu%15d%%\n", 10,
+					   elem, pct);
+	}
+	num_elem = s->latency_writes_elems;
+	if (num_elem > 0) {
+		bytes_written += scnprintf(buf + bytes_written,
+			   PAGE_SIZE - bytes_written,
+			   "IO svc_time Write Latency Histogram (n = %llu):\n",
+			   num_elem);
+		for (i = 0;
+		     i < ARRAY_SIZE(latency_x_axis_us);
+		     i++) {
+			elem = s->latency_y_axis_write[i];
+			pct = div64_u64(elem * 100, num_elem);
+			bytes_written += scnprintf(buf + bytes_written,
+						   PAGE_SIZE - bytes_written,
+						   "\t< %5lluus%15llu%15d%%\n",
+						   latency_x_axis_us[i],
+						   elem, pct);
+		}
+		/* Last element in y-axis table is overflow */
+		elem = s->latency_y_axis_write[i];
+		pct = div64_u64(elem * 100, num_elem);
+		bytes_written += scnprintf(buf + bytes_written,
+					   PAGE_SIZE - bytes_written,
+					   "\t> %5dms%15llu%15d%%\n", 10,
+					   elem, pct);
+	}
+	return bytes_written;
+}
+EXPORT_SYMBOL(blk_latency_hist_show);

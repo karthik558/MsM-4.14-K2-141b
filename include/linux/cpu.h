@@ -185,6 +185,13 @@ void cpuhp_report_idle_dead(void);
 static inline void cpuhp_report_idle_dead(void) { }
 #endif /* #ifdef CONFIG_HOTPLUG_CPU */
 
+#define IDLE_START 1
+#define IDLE_END 2
+
+void idle_notifier_register(struct notifier_block *n);
+void idle_notifier_unregister(struct notifier_block *n);
+void idle_notifier_call_chain(unsigned long val);
+
 enum cpuhp_smt_control {
 	CPU_SMT_ENABLED,
 	CPU_SMT_DISABLED,
@@ -208,5 +215,7 @@ static inline int cpuhp_smt_disable(enum cpuhp_smt_control ctrlval) { return 0; 
 
 extern bool cpu_mitigations_off(void);
 extern bool cpu_mitigations_auto_nosmt(void);
+
+extern unsigned int logical_bootcpu_id;
 
 #endif /* _LINUX_CPU_H_ */

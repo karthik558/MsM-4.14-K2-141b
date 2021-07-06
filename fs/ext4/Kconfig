@@ -110,7 +110,7 @@ config EXT4_ENCRYPTION
 
 config EXT4_FS_ENCRYPTION
 	bool
-	default y
+	default n
 	depends on EXT4_ENCRYPTION
 
 config EXT4_DEBUG
