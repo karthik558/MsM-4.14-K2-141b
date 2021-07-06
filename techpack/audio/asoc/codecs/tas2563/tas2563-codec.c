@@ -1333,6 +1333,9 @@ static int tas2563_set_bitwidth(struct tas2563_priv *pTAS2563, int bitwidth)
 	int slot_width_tmp = 0;
 	dev_info(pTAS2563->dev, "%s %d\n", __func__, __LINE__);
 
+	/* Hardcode bitwidth to 32bit_le */
+	bitwidth = SNDRV_PCM_FORMAT_S32_LE;
+
 	switch (bitwidth) {
 	case SNDRV_PCM_FORMAT_S16_LE:
 			pTAS2563->update_bits(pTAS2563, 
