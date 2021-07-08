@@ -1864,6 +1864,9 @@ int tas2563_set_program(struct tas2563_priv *pTAS2563,
 	if (nResult < 0)
 		goto end;
 	msleep(1);
+	nResult = tas2563_load_default(pTAS2563);
+	if (nResult < 0)
+		goto end;
 
 	dev_info(pTAS2563->dev, "load program %d (%s)\n", nProgram, pProgram->mpName);
 	nResult = tas2563_load_data(pTAS2563, &(pProgram->mData), TAS2563_BLOCK_PGM_DEV_A);
@@ -1872,10 +1875,6 @@ int tas2563_set_program(struct tas2563_priv *pTAS2563,
 	pTAS2563->mnCurrentProgram = nProgram;
 
 	nResult = tas2563_load_coefficient(pTAS2563, -1, nConfiguration, false);
-	if (nResult < 0)
-		goto end;
-
-	nResult = tas2563_load_default(pTAS2563);
 	if (nResult < 0)
 		goto end;
 
